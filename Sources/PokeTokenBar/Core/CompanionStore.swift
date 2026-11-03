@@ -1699,7 +1699,7 @@ final class CompanionStore {
         let hatchBody: String
         if let prayers, prayers.count > 0 {
             hatchBody = l.notifPrayerHatchBody(name, prayers: prayers.count, shiny: showShiny,
-                                               legendary: line.rarity == .legendary)
+                                               rarity: line.rarity)
         } else {
             hatchBody = showShiny ? l.notifShinyHatchBody(name, odds: shinyOdds) : l.notifHatchBody(name)
         }

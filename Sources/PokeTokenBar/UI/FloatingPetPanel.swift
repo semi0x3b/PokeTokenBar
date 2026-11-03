@@ -575,7 +575,7 @@ struct FloatingPetView: View {
         } else {
             base = l.floatingPetHoverTokensOnly(usage)
         }
-        return prayers > 0 ? base + "\n" + l.prayerCount(prayers) : base
+        return prayers > 0 ? base + "\n" + l.prayerHoverLine(prayers) : base
     }
 }
 
