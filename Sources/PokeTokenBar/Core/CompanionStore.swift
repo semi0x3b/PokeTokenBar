@@ -781,6 +781,7 @@ final class CompanionStore {
     // MARK: 갱신 (AppDelegate 가 UsageStore 값으로 호출)
 
     /// `timeSinceLastUsage`: nil when unknown (see `UsageStore.timeSinceLastUsage`); unknown never sulks.
+    /// It comes from the slower enrichment scan, so a rise in today's total seen here counts as usage at once.
     func update(todayTokensByProvider: [String: Int], todayDate: String, monthTotal: Int,
                 burnTier: BurnTier, limitWarning: Bool, hasUsageData: Bool,
                 timeSinceLastUsage: TimeInterval? = nil) {
@@ -789,6 +790,8 @@ final class CompanionStore {
         // provider 데이터만 담는다. stale snapshot이나 today == nil carrier만 있는 refresh는
         // ledger의 기준점을 움직일 수 있는 관측으로 취급하지 않는다.
         let hasCurrentProviderData = hasUsageData && !todayTokensByProvider.isEmpty
+        let idle = effectiveIdle(timeSinceLastUsage: timeSinceLastUsage, todayDate: todayDate,
+                                 todayTokens: todayTokens, hasCurrentProviderData: hasCurrentProviderData)
         if !state.installBaselineSet {
             // 설치 기준선 — 실제 데이터가 도착한 시점의 today 를 baseline 으로(이전 사용량 미카운트).
             // 데이터 도착 전(기동 직후 빈 새로고침)에는 잡지 않는다.
@@ -905,8 +908,8 @@ final class CompanionStore {
         }
         displayState = computeState(burnTier: burnTier, limitWarning: limitWarning,
                                     hasUsageData: hasUsageData, today: todayTokens,
-                                    timeSinceLastUsage: timeSinceLastUsage)
-        sulkIdle = displayState == .sulk ? timeSinceLastUsage ?? 0 : 0
+                                    timeSinceLastUsage: idle)
+        sulkIdle = displayState == .sulk ? idle ?? 0 : 0
         save()
         autoSnapshotIfNeeded()
     }
@@ -1843,13 +1846,34 @@ final class CompanionStore {
         return nil
     }
 
+    /// Today's total at the previous refresh, and when a rise in it was last seen. The enrichment scan's
+    /// `lastUsage` lags a refresh behind, so without this the companion would keep its back turned for a
+    /// while after usage resumed. Not persisted: after a launch there is nothing to compare with.
+    private var lastSeenToday: (date: String, total: Int)?
+    private var lastObservedUsage: Date?
+
+    /// `timeSinceLastUsage`, capped by how long ago this store itself saw today's total rise.
+    /// A new day or a first sighting only sets the baseline — it is not usage, so a midnight rollover
+    /// neither un-sulks nor sulks by itself. nil stays nil: unknown is never idle.
+    private func effectiveIdle(timeSinceLastUsage: TimeInterval?, todayDate: String, todayTokens: Int,
+                               hasCurrentProviderData: Bool) -> TimeInterval? {
+        if hasCurrentProviderData {
+            if let seen = lastSeenToday, seen.date == todayDate, todayTokens > seen.total {
+                lastObservedUsage = clock()
+            }
+            lastSeenToday = (todayDate, todayTokens)
+        }
+        guard let reported = timeSinceLastUsage else { return nil }
+        guard let observed = lastObservedUsage else { return reported }
+        return min(reported, max(0, clock().timeIntervalSince(observed)))
+    }
+
     private func computeState(burnTier: BurnTier, limitWarning: Bool, hasUsageData: Bool, today: Int,
                               timeSinceLastUsage: TimeInterval? = nil) -> CompanionStateKind {
         if state.active == nil { return .egg }
         if justGraduated != nil || (eventUntil != nil && clock() < eventUntil!) { return .levelUp }
         if limitWarning { return .tired }
-        // `today == 0` also covers a scan that has not yet caught usage since the last refresh.
-        if hasUsageData, today == 0, let idle = timeSinceLastUsage, idle >= PokemonBalance.sulkAfterIdle {
+        if hasUsageData, let idle = timeSinceLastUsage, idle >= PokemonBalance.sulkAfterIdle {
             return .sulk
         }
         if !hasUsageData || today == 0 { return .sleep }

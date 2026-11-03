@@ -14,8 +14,9 @@ private final class SulkClock: @unchecked Sendable {
 
 @MainActor
 final class SulkStateTests: XCTestCase {
+    private let clock = SulkClock()
+
     private func makeStore(expireHatchWindow: Bool = true) async -> CompanionStore {
-        let clock = SulkClock()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("poke-sulk-\(UUID().uuidString).json")
         let line = EvoLine(baseID: 1, tree: EvoNode(speciesID: 1, children: []), rarity: .common, names: [:])
         let store = CompanionStore(provider: StubProvider(value: line), clock: { clock.now },
@@ -26,8 +27,8 @@ final class SulkStateTests: XCTestCase {
     }
 
     private func update(_ store: CompanionStore, today: Int = 0, idle: TimeInterval?, hasData: Bool = true,
-                        limitWarning: Bool = false) {
-        store.update(todayTokensByProvider: ["test": today], todayDate: "d", monthTotal: 0, burnTier: .idle,
+                        limitWarning: Bool = false, date: String = "d") {
+        store.update(todayTokensByProvider: ["test": today], todayDate: date, monthTotal: 0, burnTier: .idle,
                      limitWarning: limitWarning, hasUsageData: hasData, timeSinceLastUsage: idle)
     }
 
@@ -95,7 +96,7 @@ final class SulkStateTests: XCTestCase {
         let store = await makeStore()
         update(store, idle: 2 * threshold)
         XCTAssertEqual(store.displayState, .sulk)
-        // Usage resumes: today's tokens show up before the scan's last-usage time catches up.
+        // Usage resumes: today's total rises before the scan's last-usage time catches up.
         update(store, today: 500, idle: 2 * threshold)
         XCTAssertNotEqual(store.displayState, .sulk)
         XCTAssertFalse(store.facesBack)
@@ -103,6 +104,55 @@ final class SulkStateTests: XCTestCase {
         // And once the scan catches up, the idle time is small again.
         update(store, idle: 60)
         XCTAssertEqual(store.displayState, .sleep)
+    }
+
+    func testSameDayIdleSulksEvenThoughTodayHasUsage() async {
+        let store = await makeStore()
+        // Worked 09:00-12:00, away since: today's total is positive but the last usage is 4 h old.
+        update(store, today: 40_000, idle: 4 * 3600)
+        XCTAssertEqual(store.displayState, .sulk)
+        XCTAssertTrue(store.facesBack)
+        XCTAssertEqual(store.sulkIdle, 4 * 3600)
+        update(store, today: 40_000, idle: 3 * 3600 - 1)
+        XCTAssertNotEqual(store.displayState, .sulk, "just under three hours")
+    }
+
+    func testRisingTodayTotalUnSulksBeforeTheScanCatchesUp() async {
+        let store = await makeStore()
+        update(store, today: 40_000, idle: 4 * 3600)
+        XCTAssertEqual(store.displayState, .sulk)
+        update(store, today: 40_500, idle: 4 * 3600)   // the scan still reports the old last usage
+        XCTAssertNotEqual(store.displayState, .sulk)
+        XCTAssertFalse(store.facesBack)
+        XCTAssertEqual(store.sulkIdle, 0)
+        // Nothing further happens for three hours: the observed usage ages like any other.
+        clock.now = clock.now.addingTimeInterval(3 * 3600)
+        update(store, today: 40_500, idle: 7 * 3600)
+        XCTAssertEqual(store.displayState, .sulk)
+    }
+
+    func testFirstSightingAfterLaunchIsNotUsage() async {
+        let store = await makeStore()
+        update(store, today: 0, idle: nil, hasData: false)   // launch: no data in yet
+        update(store, today: 40_000, idle: 4 * 3600)         // the first total with data
+        XCTAssertEqual(store.displayState, .sulk, "the first total with data is a baseline, not a rise")
+    }
+
+    func testMidnightRolloverNeitherUnSulksNorSulksByItself() async {
+        let store = await makeStore()
+        update(store, today: 40_000, idle: 4 * 3600, date: "2026-09-01")
+        XCTAssertEqual(store.displayState, .sulk)
+        // A new day starts from a different (even larger) total: a new baseline, not a rise.
+        update(store, today: 90_000, idle: 5 * 3600, date: "2026-09-02")
+        XCTAssertEqual(store.displayState, .sulk)
+        update(store, today: 0, idle: 5 * 3600, date: "2026-09-03")
+        XCTAssertEqual(store.displayState, .sulk)
+        // Only a rise within the same day counts.
+        update(store, today: 300, idle: 5 * 3600, date: "2026-09-03")
+        XCTAssertNotEqual(store.displayState, .sulk)
+        // And an active companion is not pushed into sulking by the rollover.
+        update(store, today: 0, idle: 60, date: "2026-09-04")
+        XCTAssertNotEqual(store.displayState, .sulk)
     }
 
     func testLevelUpBeatsSulk() async {
