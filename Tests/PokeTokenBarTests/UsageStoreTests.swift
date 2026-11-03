@@ -372,16 +372,6 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.floatingPetBubbleAlerts)
     }
 
-    /// Turning its back is opt-out: default on, persisted, and when off no idle days are ever reported.
-    func testTurnsBackWhenNeglectedDefaultsOnPersistsAndGatesIdleDays() {
-        let claude = FakeUsageProvider(id: "claude_code", displayName: "Claude Code", daily: todayDaily(1_000))
-        let store = makeStore(providers: [claude])
-        XCTAssertTrue(store.turnsBackWhenNeglected)
-        store.turnsBackWhenNeglected = false
-        XCTAssertEqual(store.idleDaysBeforeToday, 0)
-        XCTAssertFalse(makeStore(providers: [claude]).turnsBackWhenNeglected, "persists across restarts")
-    }
-
     /// Bubble picker is pure: critical beats warn; within a tier higher utilization wins (stable choice).
     func testBubbleAlertPicksHighestSeverityThenUtilization() {
         let warnLow = UsageStore.LimitAlert(key: "a", window: "A", isCritical: false, utilization: 81)

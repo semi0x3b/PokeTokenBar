@@ -125,7 +125,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         withObservationTracking {
             _ = store.menuTitle
             _ = store.menuToolTip
-            _ = store.turnsBackWhenNeglected   // feeds `updateCompanion`
             // The mode and thresholds can change the colors while the text stays the same.
             _ = store.menuLimitColorRuns()
         } onChange: { [weak self] in

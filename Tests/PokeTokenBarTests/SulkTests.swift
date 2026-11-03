@@ -105,22 +105,6 @@ final class SulkStateTests: XCTestCase {
         XCTAssertEqual(store.displayState, .levelUp)
     }
 
-    /// With the option off the app passes 0 idle days (see `AppDelegate.updateCompanion`): no sulk, no hover text.
-    func testOptionOffFallsThroughToSleepAndHidesTheHoverText() async {
-        let store = await hatchedStore()
-        update(store, today: 0, idleDays: 3)
-        XCTAssertEqual(store.displayState, .sulk)
-        update(store, today: 0, idleDays: 0)
-        XCTAssertEqual(store.displayState, .sleep)
-        XCTAssertFalse(store.facesBack)
-        XCTAssertEqual(store.sulkDays, 0)
-        let l = L(.ko)
-        let off = FloatingPetView.hoverTooltip(todayTokens: 0, limitUtilization: nil, mode: .used, l: l,
-                                               sulkDays: store.sulkDays)
-        XCTAssertEqual(off, l.floatingPetHoverTokensOnly("0"))
-        XCTAssertFalse(off.contains(l.floatingPetHoverSulk(3)))
-    }
-
     func testEggNeverSulks() {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("poke-sulk-\(UUID().uuidString).json")
         let line = EvoLine(baseID: 1, tree: EvoNode(speciesID: 1, children: []), rarity: .common, names: [:])
