@@ -654,19 +654,6 @@ struct CompanionHeader: View {
         return "\(TokenFormatter.compact(used)) / \(TokenFormatter.compact(total)) · \(percent)%"
     }
 
-    /// Egg-only placebo: counts prayers, changes nothing about what hatches.
-    private var prayerRow: some View {
-        HStack(spacing: 6) {
-            Button { store.pray() } label: { Text("🙏 " + store.l.prayButton).font(.caption2) }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .help(store.l.prayButton)
-            if let prayers = store.state.eggPrayers {
-                Text(store.l.prayerCount(prayers.count)).font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-    }
-
     /// 부화 임박(90%+) — 알이 흔들리고 문구가 바뀐다.
     private var eggImminent: Bool { store.isEgg && store.eggProgress >= 0.9 }
 
@@ -681,17 +668,6 @@ struct CompanionHeader: View {
                     .background(Color.secondary.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .rotationEffect(.degrees(eggImminent && eggWiggle ? 5 : (eggImminent ? -5 : 0)))
-                    // One-shot wobble per prayer; the keyframes run once per trigger change, never in a loop.
-                    .keyframeAnimator(initialValue: 0.0, trigger: store.state.eggPrayers?.count) { sprite, angle in
-                        sprite.rotationEffect(.degrees(angle))
-                    } keyframes: { _ in
-                        KeyframeTrack {
-                            LinearKeyframe(-9.0, duration: 0.06)
-                            LinearKeyframe(9.0, duration: 0.10)
-                            LinearKeyframe(-5.0, duration: 0.08)
-                            LinearKeyframe(0.0, duration: 0.06)
-                        }
-                    }
                     .scaleEffect(celebScale)
                     .overlay(RoundedRectangle(cornerRadius: 12).fill(.white).opacity(flashOpacity))
                     .overlay(alignment: .topTrailing) {
@@ -792,7 +768,6 @@ struct CompanionHeader: View {
                             Text(store.l.eggToHatch(TokenFormatter.compact(store.eggTokensToHatch)))
                                 .font(.caption2).foregroundStyle(.tertiary)
                         }
-                        prayerRow
                         // 첫 실행(적립 0) — 정적 알 앞에서 "고장났나" 오해 방지용 한 줄 안내
                         if !store.eggStarted {
                             Text(store.l.eggFirstRunHint(TokenFormatter.compact(store.eggHatchThreshold)))

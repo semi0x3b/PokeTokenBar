@@ -84,13 +84,6 @@ final class EggPrayerRenderTests: XCTestCase {
         let prayed = PrayerRecord(count: 37, wasFutile: false, eggWasPurchased: false)
         let futile = PrayerRecord(count: 37, wasFutile: true, eggWasPurchased: true)
         for (language, tag) in [(AppLanguage.ko, "ko"), (.en, "en")] {
-            let eggNone = try await store(language: language, prayers: nil, egg: true)
-            try await writePNG(CompanionHeader(store: eggNone), height: 230,
-                               to: output.appendingPathComponent("egg-home-0-prayers-\(tag).png"))
-            let egg37 = try await store(language: language, prayers: prayed, egg: true)
-            try await writePNG(CompanionHeader(store: egg37), height: 230,
-                               to: output.appendingPathComponent("egg-home-37-prayers-\(tag).png"))
-
             for (record, name) in [(nil, "detail-no-prayers"), (prayed, "detail-37-prayers"),
                                    (futile, "detail-37-prayers-futile-purchased-egg")] as [(PrayerRecord?, String)] {
                 let store = try await store(language: language, prayers: record, egg: false)
