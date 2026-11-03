@@ -225,27 +225,44 @@ final class EggPrayerTests: XCTestCase {
                                     (false, .rare), (false, .common)] {
                 XCTAssertTrue(l.notifPrayerHatchBody("X", prayers: 5, shiny: shiny, rarity: rarity).contains("5"))
             }
-            for n in [1, 3, 7, 20, 40, 70, 200] {
+            for n in [1, 3, 30, 70, 130, 200, 400] {
                 XCTAssertFalse(l.prayerQuip(n).isEmpty)
                 XCTAssertTrue(l.prayerHoverLine(n).contains("\(n)"))
             }
         }
     }
 
-    func testQuipTiersChangeExactlyAtTheBoundaries() {
-        let boundaries: [(Int, Int)] = [(1, 0), (2, 1), (4, 1), (5, 2), (9, 2), (10, 3), (29, 3),
-                                        (30, 4), (49, 4), (50, 5), (99, 5), (100, 6), (5000, 6)]
-        for (prayers, tier) in boundaries {
-            XCTAssertEqual(L.prayerQuipTier(prayers), tier, "\(prayers) prayers")
+    func testQuipIndexAdvancesEveryThirtyPrayersAndStopsAtTheLast() {
+        XCTAssertNil(L.prayerQuipIndex(0), "nothing to say before the first prayer")
+        XCTAssertNil(L.prayerQuipIndex(-1))
+        let expected: [(Int, Int)] = [(1, 0), (29, 0), (30, 1), (59, 1), (60, 2), (299, 9), (300, 10), (10_000, 10)]
+        for (prayers, index) in expected {
+            XCTAssertEqual(L.prayerQuipIndex(prayers), index, "\(prayers) prayers")
+        }
+        XCTAssertEqual(L.prayerQuipCount, 11)
+    }
+
+    func testEveryQuipExistsInEveryLanguageAndTheyAreAllDifferent() {
+        for language in AppLanguage.allCases {
+            let l = L(language)
+            let quips = (0..<L.prayerQuipCount).map { l.prayerQuip($0 * L.prayersPerQuip + 1) }
+            XCTAssertTrue(quips.allSatisfy { !$0.isEmpty }, "\(language) has an empty quip")
+            XCTAssertEqual(Set(quips).count, quips.count, "\(language) repeats a quip")
         }
     }
 
     func testHoverLineCopy() {
-        XCTAssertEqual(L(.ko).prayerHoverLine(1), "기도 1회 · 일단 찔러봄")
-        XCTAssertEqual(L(.ko).prayerHoverLine(30), "기도 30회 · 하늘 고객센터 대기 순번 3,812번")
-        XCTAssertEqual(L(.en).prayerHoverLine(1), "1 prayer · just testing the line")
-        XCTAssertEqual(L(.en).prayerHoverLine(3), "3 prayers · heaven left you on read")
-        XCTAssertEqual(L(.en).prayerHoverLine(100), "100 prayers · if a legendary hatches, that's pure skill")
+        XCTAssertEqual(L(.ko).prayerHoverLine(0), "")
+        XCTAssertEqual(L(.ko).prayerHoverLine(1), "기도 1회 · 일단 한번 빌어봄")
+        XCTAssertEqual(L(.ko).prayerHoverLine(30), "기도 30회 · 하늘이 아직 확인 안 함")
+        XCTAssertEqual(L(.ko).prayerHoverLine(150), "기도 150회 · 하늘 대기열 3,812번째")
+        XCTAssertEqual(L(.ko).prayerHoverLine(240), "기도 240회 · 하늘: \"접수했습니다. 검토 후 답변드릴게요\"")
+        XCTAssertEqual(L(.ko).prayerHoverLine(299), "기도 299회 · 알이 방금 \"그만…\"이라고 한 것 같음")
+        XCTAssertEqual(L(.en).prayerHoverLine(1), "1 prayer · just trying it out")
+        XCTAssertEqual(L(.en).prayerHoverLine(31), "31 prayers · heaven hasn't checked yet")
+        XCTAssertEqual(L(.en).prayerHoverLine(120), "120 prayers · heaven's servers are lagging")
+        XCTAssertEqual(L(.en).prayerHoverLine(180), "180 prayers · your palms are wearing thin")
+        XCTAssertEqual(L(.en).prayerHoverLine(300), "300 prayers · if a legendary hatches, that's pure skill")
     }
 
     func testFutileNoteDependsOnHowTheEggArrived() {
@@ -298,13 +315,14 @@ final class EggPrayerTests: XCTestCase {
         let plain = FloatingPetView.hoverTooltip(todayTokens: 1, limitUtilization: nil, mode: .used, l: l)
         let prayed = FloatingPetView.hoverTooltip(todayTokens: 1, limitUtilization: nil, mode: .used, l: l, prayers: 3)
         XCTAssertFalse(plain.contains("기도"))
-        XCTAssertEqual(prayed, plain + "\n기도 3회 · 하늘이 읽씹 중")
+        XCTAssertEqual(prayed, plain + "\n기도 3회 · 일단 한번 빌어봄")
     }
 
     // MARK: prayer-triggered usage refresh
 
     private func makeRouter(clock: @escaping () -> Date, log: PrayerCallLog) -> PetClickRouter {
         PetClickRouter(pray: { log.prays += 1; log.eggPrayers += 1 }, prayerCount: { log.eggPrayers },
+                       didPray: { log.didPray += 1 },
                        spawnEmoji: { log.emojis += 1 }, refreshUsage: { log.refreshes += 1 },
                        openPopover: { log.opens += 1 }, clock: clock)
     }
@@ -313,12 +331,13 @@ final class EggPrayerTests: XCTestCase {
         for _ in 0..<times { router.handle(subjectIsEgg: true) }
     }
 
-    func testMilestonesGrowByTheStepEachTime() {
-        let milestones = [0: 0, 9: 0, 10: 0, 29: 0, 30: 1, 59: 1, 60: 2, 99: 2, 100: 3, 149: 3, 150: 4]
+    func testMilestonesAreEveryThirtyPrayers() {
+        let milestones = [0: 0, 1: 0, 29: 0, 30: 1, 59: 1, 60: 2, 89: 2, 90: 3, 120: 4]
         for (count, milestone) in milestones {
             XCTAssertEqual(FloatingPetController.prayerRefreshMilestone(for: count), milestone, "\(count) prayers")
         }
-        XCTAssertEqual(FloatingPetController.prayerRefreshMilestone(for: Int.max / 4) > 0, true, "huge counts do not trap")
+        XCTAssertEqual(FloatingPetController.prayersPerRefresh, 30)
+        XCTAssertEqual(FloatingPetController.prayerRefreshMilestone(for: Int.max), Int.max / 30, "huge counts do not trap")
     }
 
     func testPrayerRefreshFollowsTheMilestones() {
@@ -337,11 +356,12 @@ final class EggPrayerTests: XCTestCase {
         pray(1, on: router)
         XCTAssertEqual(log.refreshes, 2, "the 60th prayer refreshes")
         current = now.addingTimeInterval(floor * 2)
-        pray(39, on: router)
+        pray(29, on: router)
         XCTAssertEqual(log.refreshes, 2)
         pray(1, on: router)
-        XCTAssertEqual(log.refreshes, 3, "the 100th prayer refreshes")
+        XCTAssertEqual(log.refreshes, 3, "the 90th prayer refreshes")
         XCTAssertEqual(log.emojis, log.prays, "every click still spawns its emoji")
+        XCTAssertEqual(log.didPray, log.prays, "every click rebuilds the hover text")
     }
 
     func testAMilestoneInsideTheFloorIsRefreshedByTheFirstClickAfterIt() {
@@ -381,6 +401,7 @@ final class EggPrayerTests: XCTestCase {
         for _ in 0..<50 { router.handle(subjectIsEgg: false) }
         XCTAssertEqual(log.opens, 50)
         XCTAssertEqual(log.prays, 29)
+        XCTAssertEqual(log.didPray, 29, "hatched clicks do not touch the prayer hover text")
         XCTAssertEqual(log.refreshes, 0, "hatched-Pokémon clicks never count")
         pray(1, on: router)
         XCTAssertEqual(log.refreshes, 1, "the 30th real prayer still refreshes")
@@ -403,7 +424,7 @@ final class EggPrayerTests: XCTestCase {
 
 @MainActor
 private final class PrayerCallLog {
-    var prays = 0, emojis = 0, refreshes = 0, opens = 0
+    var prays = 0, emojis = 0, refreshes = 0, opens = 0, didPray = 0
     /// The persisted prayer count of the current egg (reset by the test to simulate a new egg).
     var eggPrayers = 0
 }
