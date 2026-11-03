@@ -110,17 +110,9 @@ final class PetEventLineTests: XCTestCase {
 
     // MARK: a disguised Ditto must not be spoiled by the event line
 
-    /// A seed whose hatch rolls (shiny, nature, Ditto disguise) end in a shiny, disguised Ditto.
-    private func shinyDisguisingSeed() throws -> UInt64 {
-        for candidate: UInt64 in 0..<2_000_000 {
-            var rng = SeededRNG(seed: candidate)
-            let shinyRoll = rng.next(); _ = rng.next(); let dittoRoll = rng.next()
-            if shinyRoll % PokemonOdds.shinyDenominator == 0 && dittoRoll % PokemonOdds.dittoDisguiseDenominator == 0 {
-                return candidate
-            }
-        }
-        throw XCTSkip("no seed found")
-    }
+    /// Found once with a plain script using this RNG and the hatch roll order (shiny, nature, Ditto disguise):
+    /// the hatch is a shiny, disguised Ditto. Not searched at test time (about 1 in 8192 seeds).
+    private static let shinyDisguisedDittoSeed: UInt64 = 2466
 
     private func dittoStore(seed: UInt64) -> CompanionStore {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("event-ditto-\(UUID()).json")
@@ -131,7 +123,7 @@ final class PetEventLineTests: XCTestCase {
     }
 
     func testDisguisedDittoHatchEventShowsTheDisguiseAndHidesShiny() async throws {
-        let seed = try shinyDisguisingSeed()
+        let seed = Self.shinyDisguisedDittoSeed
 
         let plain = dittoStore(seed: seed)
         await plain.hatch(baseID: 1)
@@ -148,7 +140,7 @@ final class PetEventLineTests: XCTestCase {
     }
 
     func testRevealEventReplacesTheHatchLineAndNeverShowsAnEvolution() async throws {
-        let store = dittoStore(seed: try shinyDisguisingSeed())
+        let store = dittoStore(seed: Self.shinyDisguisedDittoSeed)
         await store.hatch(baseID: 1)
         store.applyUsage(130_000_000)   // past the first evolution threshold: the disguise breaks instead of evolving
         let deadline = Date().addingTimeInterval(2)
