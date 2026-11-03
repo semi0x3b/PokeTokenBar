@@ -58,11 +58,15 @@ struct SpriteSubject: Equatable {
     var loadedID: Int?
     var loadedShiny = false
     var loadedForm: PokemonForm? = nil
+    /// True when `image` was requested as the back sprite (it may still be the front one if no back exists).
+    var loadedBack = false
 
     /// Keep the cached pixels and their identity together, including when a pending load is cancelled.
-    func startingLoad(cachedImage: NSImage?, for id: Int, shiny: Bool, form: PokemonForm?) -> SpriteSubject {
+    func startingLoad(cachedImage: NSImage?, for id: Int, shiny: Bool, form: PokemonForm?,
+                      back: Bool = false) -> SpriteSubject {
         SpriteSubject(image: cachedImage, loadedID: cachedImage == nil ? nil : id,
-                      loadedShiny: shiny, loadedForm: PokemonForm.resolved(speciesID: id, form: form))
+                      loadedShiny: shiny, loadedForm: PokemonForm.resolved(speciesID: id, form: form),
+                      loadedBack: back)
     }
 
     /// 주체가 알로 바뀌었다(졸업·새 알). 이전 **개체**의 이미지는 다른 주체의 픽셀이라 버린다.
@@ -79,9 +83,10 @@ struct SpriteSubject: Equatable {
     /// "이미 로드됨"으로 판단해 🥚 글리프가 고정된다.
     /// (nil 로 돌려주는 이유: 같은 값을 되쓰면 @State 무효화가 한 번 더 돌아 항상 떠 있는 펫에 불필요한 재렌더가 생긴다.)
     func applyingLoad(_ image: NSImage?, for id: Int, cancelled: Bool,
-                      shiny: Bool = false, form: PokemonForm? = nil) -> SpriteSubject? {
+                      shiny: Bool = false, form: PokemonForm? = nil, back: Bool = false) -> SpriteSubject? {
         cancelled ? nil : SpriteSubject(image: image, loadedID: id, loadedShiny: shiny,
-                                        loadedForm: PokemonForm.resolved(speciesID: id, form: form))
+                                        loadedForm: PokemonForm.resolved(speciesID: id, form: form),
+                                        loadedBack: back)
     }
 
     /// 로드된 알 스프라이트를 반영한 결과(같은 이유로 취소면 nil). 알은 종이 없으므로 loadedID 는 그대로.
@@ -107,6 +112,8 @@ struct SpriteView: View {
     /// 팝오버 등 일시적 표시는 0(기본)으로 두어 네이티브 fps 유지.
     var minFrameDelay: TimeInterval = 0
     var form: PokemonForm? = nil
+    /// Show the back sprite (the companion turned away); missing back sprites fall back to the front one.
+    var back: Bool = false
     private let spriteStore: SpriteStore
     @State private var subject: SpriteSubject
     @State private var up = false
@@ -115,9 +122,10 @@ struct SpriteView: View {
 
     init(speciesID: Int?, size: CGFloat = 84, bob: Bool = false, animated: Bool = false,
          shiny: Bool = false, minFrameDelay: TimeInterval = 0, spriteStore: SpriteStore = .shared,
-         form: PokemonForm? = nil) {
+         form: PokemonForm? = nil, back: Bool = false) {
         self.speciesID = speciesID
         self.spriteStore = spriteStore
+        self.back = back
         self.size = size
         self.bob = bob
         self.animated = animated
@@ -128,14 +136,16 @@ struct SpriteView: View {
         // speciesID==nil(알 상태)이면 알 스프라이트를 시드(없으면 body 가 🥚 폴백).
         let resolvedForm = speciesID.flatMap { PokemonForm.resolved(speciesID: $0, form: form) }
         let cached = speciesID.map { SpriteLoader.cachedImage(speciesID: $0, shiny: shiny, directory: spriteStore.directory,
-                                                            form: resolvedForm) } ?? SpriteLoader.cachedEggImage()
+                                                            form: resolvedForm, back: back) } ?? SpriteLoader.cachedEggImage()
         let cachedFrames = animated ? speciesID.map {
-            SpriteLoader.cachedFrames(speciesID: $0, shiny: shiny, directory: spriteStore.directory, form: resolvedForm)
+            SpriteLoader.cachedFrames(speciesID: $0, shiny: shiny, directory: spriteStore.directory,
+                                      form: resolvedForm, back: back)
         } ?? [] : []
         _frames = State(initialValue: GIFDecoder.capFrameRate(cachedFrames, floor: minFrameDelay))
         _subject = State(initialValue: SpriteSubject(image: cached,
                                                     loadedID: (speciesID != nil && cached != nil) ? speciesID : nil,
-                                                    loadedShiny: shiny, loadedForm: resolvedForm))
+                                                    loadedShiny: shiny, loadedForm: resolvedForm,
+                                                    loadedBack: back))
     }
 
     private var resolvedForm: PokemonForm? {
@@ -146,9 +156,10 @@ struct SpriteView: View {
     /// 프레임은 하한에 맞춰 솎아낸 결과물이라, 빠지면 fps 설정 변경이 종 교체까지 안 먹는다
     /// (`AppDelegate.menuSpriteKey` 와 같은 이유). 순수·테스트용.
     static func frameTaskID(speciesID: Int?, shiny: Bool, floor: TimeInterval, animated: Bool = true,
-                            form: PokemonForm? = nil) -> String {
+                            form: PokemonForm? = nil, back: Bool = false) -> String {
         let resolved = speciesID.flatMap { PokemonForm.resolved(speciesID: $0, form: form) }
-        return "\(speciesID.map(String.init) ?? "nil")-\(shiny)-\(floor)-\(animated)-\(resolved?.rawValue ?? "")"
+        let id = "\(speciesID.map(String.init) ?? "nil")-\(shiny)-\(floor)-\(animated)-\(resolved?.rawValue ?? "")"
+        return back ? id + "-back" : id
     }
 
     /// 디코드된 GIF 프레임 중 실제로 재생할 것 — 취소됐거나 2프레임 미만이면 빈 배열(정적 폴백).
@@ -167,9 +178,9 @@ struct SpriteView: View {
     }
     private func loadStaticImage(for id: Int) async {
         let loaded = await SpriteLoader.image(speciesID: id, animated: false, shiny: shiny, store: spriteStore,
-                                              form: resolvedForm)
+                                              form: resolvedForm, back: back)
         if let next = subject.applyingLoad(loaded, for: id, cancelled: Task.isCancelled,
-                                           shiny: shiny, form: resolvedForm) {
+                                           shiny: shiny, form: resolvedForm, back: back) {
             apply(next)
         }
     }
@@ -178,8 +189,9 @@ struct SpriteView: View {
     /// 순수·테스트용(`GIFDecoder.capFrameRate` 와 같은 이유). 종만 비교하던 과거 판정은 도감의 이로치 토글에서
     /// .task 가 다시 돌아도 "이미 그 종을 로드했다"로 판정해 색이 안 바뀌는 회귀를 낳았다.
     static func needsReload(loadedID: Int?, loadedShiny: Bool, id: Int, shiny: Bool,
-                            loadedForm: PokemonForm? = nil, form: PokemonForm? = nil) -> Bool {
-        loadedID != id || loadedShiny != shiny
+                            loadedForm: PokemonForm? = nil, form: PokemonForm? = nil,
+                            loadedBack: Bool = false, back: Bool = false) -> Bool {
+        loadedID != id || loadedShiny != shiny || loadedBack != back
             || PokemonForm.resolved(speciesID: id, form: loadedForm)
                 != PokemonForm.resolved(speciesID: id, form: form)
     }
@@ -216,11 +228,11 @@ struct SpriteView: View {
         // GIF 재생 중엔 bob 정지(프레임 자체가 움직임) — 폴백/정적일 때만 상하 움직임
         .offset(y: bob && frames.isEmpty && up ? -3 : 0)
         .task(id: Self.frameTaskID(speciesID: speciesID, shiny: shiny, floor: minFrameDelay,
-                                  animated: animated, form: resolvedForm)) {
+                                  animated: animated, form: resolvedForm, back: back)) {
             // animated 프레임은 id/shiny 변경 시 항상 초기화(이전 개체 프레임 잔상 방지)
             frames = animated ? GIFDecoder.capFrameRate(
                 speciesID.map { SpriteLoader.cachedFrames(speciesID: $0, shiny: shiny, directory: spriteStore.directory,
-                                                          form: resolvedForm) } ?? [],
+                                                          form: resolvedForm, back: back) } ?? [],
                 floor: minFrameDelay) : []
             frameIndex = 0
             guard let id = speciesID else {
@@ -237,16 +249,16 @@ struct SpriteView: View {
             // Drop the previous form before any await; cached pixels and metadata change atomically.
             let reloadNeeded = Self.needsReload(loadedID: subject.loadedID, loadedShiny: subject.loadedShiny,
                                                 id: id, shiny: shiny, loadedForm: subject.loadedForm,
-                                                form: resolvedForm)
+                                                form: resolvedForm, loadedBack: subject.loadedBack, back: back)
             if reloadNeeded {
                 let cached = SpriteLoader.cachedImage(speciesID: id, shiny: shiny, directory: spriteStore.directory,
-                                                       form: resolvedForm)
-                apply(subject.startingLoad(cachedImage: cached, for: id, shiny: shiny, form: resolvedForm))
+                                                       form: resolvedForm, back: back)
+                apply(subject.startingLoad(cachedImage: cached, for: id, shiny: shiny, form: resolvedForm, back: back))
             }
             // Request animation before a missing static PNG can hold playback behind a network fetch.
             if animated && frames.isEmpty {
                 let decoded = await SpriteLoader.recoveringAnimationFrames(
-                    speciesID: id, shiny: shiny, store: spriteStore, form: resolvedForm,
+                    speciesID: id, shiny: shiny, store: spriteStore, form: resolvedForm, back: back,
                     onUnavailable: { await loadStaticImage(for: id) })
                 guard !Task.isCancelled else { return }
                 frames = GIFDecoder.capFrameRate(Self.framesToApply(decoded, cancelled: false), floor: minFrameDelay)
@@ -663,7 +675,7 @@ struct CompanionHeader: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 12) {
                 SpriteView(speciesID: store.currentSpeciesID, size: 76, bob: true, animated: true,
-                           shiny: store.currentIsShiny, form: store.currentForm)
+                           shiny: store.currentIsShiny, form: store.currentForm, back: store.facesBack)
                     .frame(width: 76, height: 76)
                     .background(Color.secondary.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -881,6 +893,7 @@ struct CompanionHeader: View {
         case .focus:   return l.statusFocus
         case .tired:   return l.statusTired
         case .sleep:   return l.statusSleep
+        case .sulk:    return l.statusSulk
         case .levelUp: return store.justEvolvedTo.map { l.statusEvolved($0) } ?? l.statusGrew
         }
     }

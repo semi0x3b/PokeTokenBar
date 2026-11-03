@@ -1,8 +1,9 @@
 import Foundation
 
 /// 표시 상태 — 사용량/burn 으로 결정(스프라이트 모션 강도·상태 문구).
+/// `sulk`: no usage yesterday or today — the companion turns its back (see `CompanionStore.computeState`).
 enum CompanionStateKind: String, Sendable {
-    case egg, idle, working, focus, tired, sleep, levelUp
+    case egg, idle, working, focus, tired, sleep, sulk, levelUp
 }
 
 /// 앱 언어. 포켓몬 이름은 PokéAPI 다국어 names 에서 가져온다.

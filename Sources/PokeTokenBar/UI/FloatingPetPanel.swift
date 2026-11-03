@@ -110,6 +110,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             _ = store.highestLimitUtilization
             _ = store.limitDisplayMode   // hover 툴팁 %가 파생되는 값 — 수동 관찰 표면은 파생 원천을 직접 추적(defect-log §표시·UI)
             _ = companion.language
+            _ = companion.sulkDays   // hover tooltip suffix
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -250,7 +251,8 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             todayTokens: store.todayTotalTokens,
             limitUtilization: store.highestLimitUtilization,
             mode: store.limitDisplayMode,
-            l: L(companion.language))
+            l: L(companion.language),
+            sulkDays: companion.sulkDays)
     }
 
     private func showHoverCallout() {
@@ -467,7 +469,8 @@ struct FloatingPetView: View {
 
             SpriteView(speciesID: subject.speciesID, size: size, animated: animated,
                        shiny: subject.isShiny,
-                       minFrameDelay: store.animationQuality.frameFloor, form: subject.form)
+                       minFrameDelay: store.animationQuality.frameFloor, form: subject.form,
+                       back: companion.facesBack)
                 .frame(width: size, height: size)
                 .zIndex(0)
         }
@@ -476,14 +479,16 @@ struct FloatingPetView: View {
                    value: store.currentBubbleAlert)
     }
 
+    /// `sulkDays` > 0 appends how long the companion has been sulking.
     static func hoverTooltip(todayTokens: Int, limitUtilization: Double?,
-                             mode: UsageStore.LimitDisplayMode, l: L) -> String {
+                             mode: UsageStore.LimitDisplayMode, l: L, sulkDays: Int = 0) -> String {
         let usage = TokenFormatter.grouped(todayTokens)
+        var text = l.floatingPetHoverTokensOnly(usage)
         if let pct = limitUtilization {
-            let text = TokenFormatter.percent(UsageStore.displayPercent(pct, mode: mode))
-            return l.floatingPetHoverWithLimit(usage, mode == .remaining ? l.percentRemaining(text) : text)
+            let percent = TokenFormatter.percent(UsageStore.displayPercent(pct, mode: mode))
+            text = l.floatingPetHoverWithLimit(usage, mode == .remaining ? l.percentRemaining(percent) : percent)
         }
-        return l.floatingPetHoverTokensOnly(usage)
+        return sulkDays > 0 ? text + " · " + l.floatingPetHoverSulk(sulkDays) : text
     }
 }
 

@@ -501,10 +501,21 @@ final class UsageStore {
     /// Day-by-day history behind the usage recap. Providers only report the current month, so the
     /// numbers are copied into a rolling ledger at every refresh — see `UsageLedger`.
     private(set) var dailyLedger = UsageLedger()
+    /// The ledger has absorbed a month series scanned in this session. Before that, a loaded ledger may be
+    /// missing days the app was closed for, so its zeros are not proof of anything.
+    private(set) var ledgerScannedThisSession = false
+
+    /// Consecutive zero-usage days directly before today, as far as this session's scan can prove.
+    /// 0 when unknown (scan not done, day not covered) — unknown is never treated as idle.
+    var idleDaysBeforeToday: Int {
+        ledgerScannedThisSession ? dailyLedger.idleDays(before: Date()) : 0
+    }
 
     private func recordDailyLedger() {
         var ledger = dailyLedger
-        ledger.merge(monthDailyTotals)
+        let series = monthDailyTotals
+        if !series.isEmpty { ledgerScannedThisSession = true }
+        ledger.merge(series)
         // This year and the one before it: the year view compares against last year, and nothing
         // reaches further back.
         let calendar = RecapPeriod.calendar()

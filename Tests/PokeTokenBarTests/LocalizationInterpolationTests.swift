@@ -66,6 +66,7 @@ final class LocalizationInterpolationTests: XCTestCase {
             // Floating pet & settings / 플로팅 펫 · 설정
             expect(lang, "floatingPetHoverTokensOnly", l.floatingPetHoverTokensOnly(a), a)
             expect(lang, "floatingPetHoverWithLimit", l.floatingPetHoverWithLimit(a, b), a, b)
+            expect(lang, "floatingPetHoverSulk", l.floatingPetHoverSulk(4242), "4242")
             expect(lang, "intervalLabel", l.intervalLabel(1860), "31")  // 1860 s → 31 min / 1860초 → 31분
             expect(lang, "customScanRootsMatches", l.customScanRootsMatches(4242), "4242")
 

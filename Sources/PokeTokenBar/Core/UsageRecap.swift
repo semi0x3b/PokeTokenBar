@@ -19,6 +19,21 @@ struct UsageLedger: Equatable, Sendable {
 
     func covers(_ day: String) -> Bool { coveredSince.map { day >= $0 } ?? false }
 
+    /// Consecutive idle days directly before `date`, counting back until a day with tokens or a day the
+    /// ledger does not cover. An uncovered day is unknown, never idle, so the count stops there.
+    func idleDays(before date: Date, calendar: Calendar = RecapPeriod.calendar()) -> Int {
+        let formatter = LocalUsageReader.localDayFormatter(timeZone: calendar.timeZone)
+        var count = 0
+        var cursor = date
+        while let previous = calendar.date(byAdding: .day, value: -1, to: cursor) {
+            let key = formatter.string(from: previous)
+            guard covers(key), tokens(on: key) == 0 else { break }
+            count += 1
+            cursor = previous
+        }
+        return count
+    }
+
     /// Records a refresh. A day never goes down: a rotated or pruned log makes the provider report
     /// less than it did yesterday, and the recap would lose days that really happened. Today keeps
     /// climbing all day, so taking the larger of the two is also what the live total does.

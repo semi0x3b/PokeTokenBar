@@ -9,6 +9,10 @@ import UserNotifications
 final class CompanionStore {
     private(set) var state = CompanionState()
     private(set) var displayState: CompanionStateKind = .egg
+    /// Consecutive zero-usage days ending today while `displayState == .sulk` (at least 2), else 0.
+    private(set) var sulkDays = 0
+    /// The companion shows its back sprite on every surface.
+    var facesBack: Bool { displayState == .sulk }
     private(set) var currentLine: EvoLine?
     private(set) var representativeSubject = RepresentativeSubject(speciesID: nil, isShiny: false)
     private(set) var isHatching = false
@@ -773,8 +777,10 @@ final class CompanionStore {
 
     // MARK: 갱신 (AppDelegate 가 UsageStore 값으로 호출)
 
+    /// `idleDaysBeforeToday`: consecutive zero-usage days directly before today that the usage data can
+    /// prove (0 when unknown — see `UsageStore.idleDaysBeforeToday`).
     func update(todayTokensByProvider: [String: Int], todayDate: String, monthTotal: Int,
-                burnTier: BurnTier, limitWarning: Bool, hasUsageData: Bool) {
+                burnTier: BurnTier, limitWarning: Bool, hasUsageData: Bool, idleDaysBeforeToday: Int = 0) {
         let todayTokens = todayTokensByProvider.values.reduce(0, +)
         // `hasUsageData`는 표시용 snapshot 존재 여부이고, 이 map은 오늘 날짜가 확인된
         // provider 데이터만 담는다. stale snapshot이나 today == nil carrier만 있는 refresh는
@@ -895,7 +901,9 @@ final class CompanionStore {
             Task { await revealDitto() }
         }
         displayState = computeState(burnTier: burnTier, limitWarning: limitWarning,
-                                    hasUsageData: hasUsageData, today: todayTokens)
+                                    hasUsageData: hasUsageData, today: todayTokens,
+                                    idleDaysBeforeToday: idleDaysBeforeToday)
+        sulkDays = displayState == .sulk ? idleDaysBeforeToday + 1 : 0
         save()
         autoSnapshotIfNeeded()
     }
@@ -1832,10 +1840,13 @@ final class CompanionStore {
         return nil
     }
 
-    private func computeState(burnTier: BurnTier, limitWarning: Bool, hasUsageData: Bool, today: Int) -> CompanionStateKind {
+    private func computeState(burnTier: BurnTier, limitWarning: Bool, hasUsageData: Bool, today: Int,
+                              idleDaysBeforeToday: Int = 0) -> CompanionStateKind {
         if state.active == nil { return .egg }
         if justGraduated != nil || (eventUntil != nil && clock() < eventUntil!) { return .levelUp }
         if limitWarning { return .tired }
+        // Yesterday must be proven idle too; an unknown yesterday arrives as 0 and never sulks.
+        if hasUsageData, today == 0, idleDaysBeforeToday >= 1 { return .sulk }
         if !hasUsageData || today == 0 { return .sleep }
         switch burnTier {
         case .idle: return .idle
