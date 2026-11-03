@@ -1451,13 +1451,18 @@ final class CompanionStore {
 
     /// companion 이벤트 시스템 알림(.app + 토글 ON 일 때만). 한도 알림과 독립.
     private var notifSeq = 0
-    /// The newest hatch / evolution / graduation / Ditto line, for the floating pet's hover text. Recorded before the
+    /// The newest hatch / evolution / graduation / Ditto line; the floating pet pops it once. Recorded before the
     /// bundled-app guard below so a dev build (no system notifications) shows it too.
-    struct CompanionEvent: Equatable { let text: String; let at: Date }
+    /// `seq` tells a new event from one already shown, even when two share a clock instant.
+    struct CompanionEvent: Equatable { let seq: Int; let text: String; let at: Date }
     private(set) var latestEvent: CompanionEvent?
+    private var eventSeq = 0
 
     private func notifyCompanionEvent(_ title: String, _ body: String, showsOnPet: Bool = true) {
-        if showsOnPet { latestEvent = CompanionEvent(text: body, at: clock()) }
+        if showsOnPet {
+            eventSeq += 1
+            latestEvent = CompanionEvent(seq: eventSeq, text: body, at: clock())
+        }
         guard AppEnv.isBundledApp else { return }
         guard UserDefaults.standard.object(forKey: "companionNotifications") as? Bool ?? true else { return }
         notifSeq += 1

@@ -7,7 +7,7 @@ private struct EventLineProvider: PokeProviding {
     func baseSpeciesIndex() async throws -> [BaseSpecies] { [BaseSpecies(id: value.baseID, captureRate: 255)] }
 }
 
-/// The floating pet's hover text shows the latest hatch / evolution line for an hour.
+/// The floating pet pops its hover callout once with the latest hatch / evolution line.
 @MainActor
 final class PetEventLineTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -27,16 +27,19 @@ final class PetEventLineTests: XCTestCase {
         return store
     }
 
-    // MARK: how long the line stays
+    // MARK: when the callout pops
 
-    func testEventLineIsShownForExactlyOneHour() {
-        let event = CompanionStore.CompanionEvent(text: "hatched", at: now)
-        let lifetime = FloatingPetController.eventLineLifetime
-        XCTAssertEqual(lifetime, 3600)
-        XCTAssertEqual(FloatingPetController.eventLine(for: event, now: now), "hatched")
-        XCTAssertEqual(FloatingPetController.eventLine(for: event, now: now.addingTimeInterval(lifetime - 1)), "hatched")
-        XCTAssertNil(FloatingPetController.eventLine(for: event, now: now.addingTimeInterval(lifetime)))
-        XCTAssertNil(FloatingPetController.eventLine(for: nil, now: now))
+    func testPopsOnlyForANewEventWhileVisibleAndWithoutABubble() {
+        func pop(_ seq: Int?, seen: Int?, visible: Bool = true, bubble: Bool = false) -> Bool {
+            FloatingPetController.shouldPopEvent(eventSeq: seq, lastSeenSeq: seen, petVisible: visible, bubbleShowing: bubble)
+        }
+        XCTAssertTrue(pop(1, seen: nil), "the first event")
+        XCTAssertTrue(pop(2, seen: 1), "a newer event")
+        XCTAssertFalse(pop(1, seen: 1), "the same event is not popped twice")
+        XCTAssertFalse(pop(nil, seen: nil), "no event")
+        XCTAssertFalse(pop(2, seen: 1, visible: false), "the pet is hidden")
+        XCTAssertFalse(pop(2, seen: 1, bubble: true), "a limit alert or hearts bubble wins")
+        XCTAssertEqual(FloatingPetController.eventPopDuration, .seconds(6))
     }
 
     func testHoverTextPutsTheEventBetweenTheUsageLineAndThePrayerLine() {
@@ -59,11 +62,13 @@ final class PetEventLineTests: XCTestCase {
         await store.hatch(baseID: 1)
         XCTAssertEqual(store.latestEvent?.text, "Bulb hatched from the egg!")
         XCTAssertEqual(store.latestEvent?.at, now)
+        let hatchSeq = store.latestEvent?.seq
 
         current = now.addingTimeInterval(120)
         store.applyUsage(PokemonBalance.phaseThreshold(rarity: .common, totalForms: 3, stageIndex: 0))
         XCTAssertEqual(store.latestEvent?.text, "Bulb evolved into Ivy!")
         XCTAssertEqual(store.latestEvent?.at, current)
+        XCTAssertNotEqual(store.latestEvent?.seq, hatchSeq, "a new event gets a new id")
     }
 
     func testGraduationIsRecordedToo() async {

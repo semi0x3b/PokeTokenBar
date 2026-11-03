@@ -98,6 +98,10 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private let hearts = PetHeartState()
     private var heartExpiry: Task<Void, Never>?
     private var isHovering = false
+    /// The event text while the self-popped callout is up (nil otherwise, so it never shows on a later hover).
+    private var eventPopText: String?
+    private var eventPopExpiry: Task<Void, Never>?
+    private var lastSeenEventSeq: Int?
 
     /// What a click on the pet does: an egg is prayed over, a hatched Pokémon opens the popover.
     enum ClickAction: Equatable { case pray, openPopover }
@@ -108,14 +112,14 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     /// i.e. at the cumulative counts 30, 60, 100, 150 (step * k(k+1)/2 without its first term, 10), so the egg's
     /// progress moves without a request per click.
     static let prayerRefreshStep = 10
-    /// How long the latest hatch / evolution line stays in the hover text.
-    static let eventLineLifetime: TimeInterval = 3600
+    /// How long the callout stays up on its own when a hatch / evolution / graduation / Ditto line arrives.
+    static let eventPopDuration: Duration = .seconds(6)
 
-    /// The event text while it is recent; nil once it is `eventLineLifetime` old. A newer event replaces the older one
-    /// in the store, so there is only ever one candidate.
-    static func eventLine(for event: CompanionStore.CompanionEvent?, now: Date) -> String? {
-        guard let event, now.timeIntervalSince(event.at) < eventLineLifetime else { return nil }
-        return event.text
+    /// Pop the callout only for an event not shown yet, while the pet is on screen and no bubble (limit alert or
+    /// hearts) is up. An event that arrives when it cannot pop is dropped, not queued.
+    static func shouldPopEvent(eventSeq: Int?, lastSeenSeq: Int?, petVisible: Bool, bubbleShowing: Bool) -> Bool {
+        guard let eventSeq, eventSeq != lastSeenSeq else { return false }
+        return petVisible && !bubbleShowing
     }
 
     /// Minimum gap between prayer-triggered refreshes. A refresh also queries the limit endpoints
@@ -173,6 +177,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         self.onOpenPopover = onOpenPopover
         self.onHide = onHide
         super.init()
+        lastSeenEventSeq = companion.latestEvent?.seq   // an event from before the pet existed is not news
         observeSettings()
         observePowerState()
         sync()
@@ -206,6 +211,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             Task { @MainActor in
                 guard let self else { return }
                 self.sync()
+                self.popEventIfNew()
                 self.observeSettings()
             }
         }
@@ -355,7 +361,29 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Show the callout by itself for `eventPopDuration` when a new event arrived. One-shot task, no standing timer.
+    private func popEventIfNew() {
+        guard let event = companion.latestEvent, event.seq != lastSeenEventSeq else { return }
+        let shouldPop = Self.shouldPopEvent(eventSeq: event.seq, lastSeenSeq: lastSeenEventSeq,
+                                            petVisible: panel?.isVisible == true, bubbleShowing: showingBubble)
+        lastSeenEventSeq = event.seq   // seen either way: a missed event is not queued
+        guard shouldPop else { return }
+        eventPopText = event.text
+        sync()   // refresh the native tooltip text too
+        showHoverCallout()
+        eventPopExpiry?.cancel()
+        eventPopExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.eventPopDuration)
+            guard !Task.isCancelled, let self else { return }
+            self.eventPopText = nil
+            self.sync()
+            if self.isHovering { self.showHoverCallout() } else { self.hideHoverCallout() }
+        }
+    }
+
     private func hide() {
+        eventPopExpiry?.cancel()
+        eventPopText = nil
         heartExpiry?.cancel()
         hearts.isShowing = false
         hideHoverCallout()
@@ -372,7 +400,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             mode: store.limitDisplayMode,
             l: L(companion.language),
             sulkIdle: companion.sulkIdle,
-            eventLine: Self.eventLine(for: companion.latestEvent, now: clock()),
+            eventLine: eventPopText,
             prayers: companion.representativeSubject.speciesID == nil ? companion.state.eggPrayers?.count ?? 0 : 0)
     }
 
