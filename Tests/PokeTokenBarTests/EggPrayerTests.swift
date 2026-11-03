@@ -308,22 +308,29 @@ final class EggPrayerTests: XCTestCase {
                        refreshUsage: { log.refreshes += 1 }, openPopover: { log.opens += 1 }, clock: clock)
     }
 
-    func testPrayerRefreshIsThrottledToOncePerInterval() {
+    func testPrayerRefreshHappensEveryFifthPrayerAtMostOncePerInterval() {
         var current = now
         let log = PrayerCallLog()
         let router = makeRouter(clock: { current }, log: log)
+        let every = FloatingPetController.prayersPerRefresh
 
+        for _ in 0..<(every - 1) { router.handle(subjectIsEgg: true) }
+        XCTAssertEqual(log.refreshes, 0, "4 clicks do not refresh")
         router.handle(subjectIsEgg: true)
-        XCTAssertEqual(log.refreshes, 1, "the first click refreshes")
+        XCTAssertEqual(log.refreshes, 1, "the 5th click refreshes")
+
         current = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval - 1)
-        router.handle(subjectIsEgg: true)
-        router.handle(subjectIsEgg: true)
-        XCTAssertEqual(log.refreshes, 1, "clicks inside the interval do not refresh")
-        XCTAssertEqual(log.prays, 3, "every click still prays")
-        XCTAssertEqual(log.emojis, 3, "and spawns its emoji")
+        for _ in 0..<every { router.handle(subjectIsEgg: true) }
+        XCTAssertEqual(log.refreshes, 1, "5 more prayers inside the interval do not refresh")
+
         current = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval)
         router.handle(subjectIsEgg: true)
-        XCTAssertEqual(log.refreshes, 2, "a click after the interval refreshes again")
+        XCTAssertEqual(log.refreshes, 2, "the next prayer after the interval refreshes (the count had piled up)")
+
+        for _ in 0..<(every - 1) { router.handle(subjectIsEgg: true) }
+        XCTAssertEqual(log.refreshes, 2, "the counter restarted after the refresh")
+        XCTAssertEqual(log.prays, 1 * every + every + 1 + (every - 1))
+        XCTAssertEqual(log.emojis, log.prays, "every click still spawns its emoji")
     }
 
     func testClickingAHatchedPokemonOpensThePopoverWithoutPrayingOrRefreshing() {
@@ -332,13 +339,23 @@ final class EggPrayerTests: XCTestCase {
         router.handle(subjectIsEgg: false)
         XCTAssertEqual(log.opens, 1)
         XCTAssertEqual(log.prays + log.emojis + log.refreshes, 0)
+
+        // Hatched-Pokémon clicks never count toward the next refresh.
+        for _ in 0..<(FloatingPetController.prayersPerRefresh - 1) { router.handle(subjectIsEgg: true) }
+        for _ in 0..<10 { router.handle(subjectIsEgg: false) }
+        XCTAssertEqual(log.refreshes, 0)
+        router.handle(subjectIsEgg: true)
+        XCTAssertEqual(log.refreshes, 1)
     }
 
     func testShouldRefreshOnPrayerDecision() {
-        XCTAssertTrue(FloatingPetController.shouldRefreshOnPrayer(lastRefreshAt: nil, now: now))
-        XCTAssertFalse(FloatingPetController.shouldRefreshOnPrayer(lastRefreshAt: now, now: now))
-        XCTAssertTrue(FloatingPetController.shouldRefreshOnPrayer(
-            lastRefreshAt: now, now: now.addingTimeInterval(FloatingPetController.prayerRefreshInterval)))
+        let every = FloatingPetController.prayersPerRefresh
+        let later = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval)
+        XCTAssertFalse(FloatingPetController.shouldRefreshOnPrayer(prayersSinceRefresh: every - 1, lastRefreshAt: nil, now: now))
+        XCTAssertTrue(FloatingPetController.shouldRefreshOnPrayer(prayersSinceRefresh: every, lastRefreshAt: nil, now: now))
+        XCTAssertFalse(FloatingPetController.shouldRefreshOnPrayer(prayersSinceRefresh: every, lastRefreshAt: now, now: now))
+        XCTAssertFalse(FloatingPetController.shouldRefreshOnPrayer(prayersSinceRefresh: every - 1, lastRefreshAt: now, now: later))
+        XCTAssertTrue(FloatingPetController.shouldRefreshOnPrayer(prayersSinceRefresh: every, lastRefreshAt: now, now: later))
     }
 }
 

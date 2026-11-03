@@ -84,11 +84,15 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     static func clickAction(subjectIsEgg: Bool) -> ClickAction { subjectIsEgg ? .pray : .openPopover }
 
-    /// Minimum gap between usage refreshes triggered by praying. A refresh also queries the limit
-    /// endpoints (Claude, Codex, Cursor, Antigravity), which have their own rate limits.
+    /// Praying refreshes usage on every Nth prayer, so the egg's progress visibly moves without a request per click.
+    static let prayersPerRefresh = 5
+    /// Minimum gap between prayer-triggered refreshes. A refresh also queries the limit endpoints
+    /// (Claude, Codex, Cursor, Antigravity), which have their own rate limits.
     static let prayerRefreshInterval: TimeInterval = 30
 
-    static func shouldRefreshOnPrayer(lastRefreshAt: Date?, now: Date) -> Bool {
+    /// Refresh when enough prayers piled up since the last prayer-triggered refresh AND the floor has passed.
+    static func shouldRefreshOnPrayer(prayersSinceRefresh: Int, lastRefreshAt: Date?, now: Date) -> Bool {
+        guard prayersSinceRefresh >= prayersPerRefresh else { return false }
         guard let lastRefreshAt else { return true }
         return now.timeIntervalSince(lastRefreshAt) >= prayerRefreshInterval
     }
@@ -403,7 +407,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 }
 
 /// Routes a plain click on the pet. Praying always counts and spawns its emoji at once;
-/// only the usage refresh it triggers is throttled.
+/// only the usage refresh it triggers is throttled (every `prayersPerRefresh`th prayer, at most once per interval).
 @MainActor
 final class PetClickRouter {
     private let pray: () -> Void
@@ -412,6 +416,7 @@ final class PetClickRouter {
     private let openPopover: () -> Void
     private let clock: () -> Date
     private var lastPrayerRefreshAt: Date?
+    private var prayersSinceRefresh = 0
 
     init(pray: @escaping () -> Void, spawnEmoji: @escaping () -> Void, refreshUsage: @escaping () -> Void,
          openPopover: @escaping () -> Void, clock: @escaping () -> Date) {
@@ -427,8 +432,11 @@ final class PetClickRouter {
         case .pray:
             pray()
             spawnEmoji()
+            prayersSinceRefresh += 1
             let now = clock()
-            if FloatingPetController.shouldRefreshOnPrayer(lastRefreshAt: lastPrayerRefreshAt, now: now) {
+            if FloatingPetController.shouldRefreshOnPrayer(prayersSinceRefresh: prayersSinceRefresh,
+                                                           lastRefreshAt: lastPrayerRefreshAt, now: now) {
+                prayersSinceRefresh = 0
                 lastPrayerRefreshAt = now
                 refreshUsage()
             }
