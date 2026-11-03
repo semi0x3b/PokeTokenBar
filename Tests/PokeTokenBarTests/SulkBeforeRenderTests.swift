@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import Vision
 import XCTest
 @testable import PokeTokenBar
 
@@ -116,30 +115,8 @@ final class SulkBeforeRenderTests: XCTestCase {
 
     // MARK: Settings section
 
-    private func crop(_ png: Data, from startTitle: String, to endTitle: String) throws -> Data {
-        let rep = try XCTUnwrap(NSBitmapImageRep(data: png))
-        let cgImage = try XCTUnwrap(rep.cgImage)
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["en-US"]
-        try VNImageRequestHandler(cgImage: cgImage).perform([request])
-        func topY(of title: String) -> CGFloat? {
-            // Rows below a title may repeat its words ("Show floating pet"), so take the topmost match.
-            let rows = (request.results ?? [])
-                .filter { $0.topCandidates(1).first?.string.lowercased().contains(title.lowercased()) == true }
-                .map { (1 - $0.boundingBox.maxY) * CGFloat(cgImage.height) }
-            return rows.min()
-        }
-        guard let top = topY(of: startTitle), let bottom = topY(of: endTitle), bottom > top else {
-            print("sulk-render crop: titles not found, writing the full page")
-            return png
-        }
-        let margin: CGFloat = 16
-        let rect = CGRect(x: 0, y: max(0, top - margin), width: CGFloat(cgImage.width), height: bottom - top)
-        let cropped = try XCTUnwrap(cgImage.cropping(to: rect))
-        return try XCTUnwrap(NSBitmapImageRep(cgImage: cropped).representation(using: .png, properties: [:]))
-    }
-
+    /// The Floating Pet section alone, at the width it has inside Settings (the page's 16 pt padding on
+    /// both sides) and as tall as its rows need — the same recipe as the "after" render.
     func testRenderSettingsFloatingPetSectionBefore() async throws {
         let directory = try outputDirectory()
         let suite = "SulkBeforeSettings-\(UUID())"
@@ -151,12 +128,14 @@ final class SulkBeforeRenderTests: XCTestCase {
         usage.floatingPetEnabled = true
         let companion = CompanionStore(fileURL: file, defaults: defaults)
         companion.setLanguage(.en)
-        let view = SettingsView(onClose: {}, onChooseRepresentative: {})
-            .environment(usage).environment(companion).environment(UpdateChecker())
-        let page = try await snapshot(mount(view, width: PopoverMetrics.width, height: 2600))
-        let l = L(.en)
-        let section = try crop(page, from: l.floatingPetSectionTitle, to: l.notificationsSection)
-        try section.write(to: directory.appendingPathComponent("settings-floating-pet-before-en.png"))
-        print("wrote settings-floating-pet-before-en.png (\(section.count) bytes)")
+        let content = FloatingPetSettingsSection()
+            .environment(usage).environment(companion)
+            .padding(16)
+            .frame(width: PopoverMetrics.width)
+            .fixedSize(horizontal: false, vertical: true)
+        let height = ceil(NSHostingView(rootView: content).fittingSize.height)
+        let png = try await snapshot(mount(content, width: PopoverMetrics.width, height: height))
+        try png.write(to: directory.appendingPathComponent("settings-floating-pet-before-en.png"))
+        print("wrote settings-floating-pet-before-en.png (\(png.count) bytes, \(Int(PopoverMetrics.width))x\(Int(height)) pt)")
     }
 }
