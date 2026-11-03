@@ -114,6 +114,8 @@ struct SpriteView: View {
     var form: PokemonForm? = nil
     /// Show the back sprite (the companion turned away); missing back sprites fall back to the front one.
     var back: Bool = false
+    /// Crack stage drawn over the egg sprite (`EggCracks.stage`); ignored for a hatched Pokémon.
+    var eggCrackStage = 0
     private let spriteStore: SpriteStore
     @State private var subject: SpriteSubject
     @State private var up = false
@@ -122,7 +124,8 @@ struct SpriteView: View {
 
     init(speciesID: Int?, size: CGFloat = 84, bob: Bool = false, animated: Bool = false,
          shiny: Bool = false, minFrameDelay: TimeInterval = 0, spriteStore: SpriteStore = .shared,
-         form: PokemonForm? = nil, back: Bool = false) {
+         form: PokemonForm? = nil, back: Bool = false, eggCrackStage: Int = 0) {
+        self.eggCrackStage = eggCrackStage
         self.speciesID = speciesID
         self.spriteStore = spriteStore
         self.back = back
@@ -221,6 +224,12 @@ struct SpriteView: View {
                 fitted(frames[frameIndex % frames.count].image)
             } else if let img = subject.image {
                 fitted(animated && speciesID != nil ? SpriteLoader.animationPlaceholder(img) : img)
+                    .overlay {
+                        // Only the cropped egg is the 30x30 grid the crack art was drawn on.
+                        if speciesID == nil, eggCrackStage > 0, Int(img.size.width) == EggCracks.gridSize {
+                            EggCrackOverlay(stage: eggCrackStage)
+                        }
+                    }
             } else {
                 Text("🥚").font(.system(size: size * 0.62)).frame(width: size, height: size)
             }
@@ -654,6 +663,7 @@ struct CompanionHeader: View {
     @State private var dittoBurst = false   // 메타몽 리빌 🎭 버스트
     @State private var seenSeq = -1     // 재생 완료한 celebrationSeq (팝오버 재오픈 시 1회 재생 보장)
     @State private var eggWiggle = false
+    @State private var crackWobble = 0
     // 사탕 "+XP" 순간 표시 (진화 없이 부분 진행일 때도 피드백)
     @State private var seenCandySeq = -1
     @State private var candyXPShown = false
@@ -680,11 +690,25 @@ struct CompanionHeader: View {
             HStack(alignment: .center, spacing: 12) {
                 SpriteView(speciesID: store.currentSpeciesID, size: 76, bob: true, animated: true,
                            shiny: store.currentIsShiny, spriteStore: spriteStore, form: store.currentForm,
-                           back: store.facesBack)
+                           back: store.facesBack, eggCrackStage: store.eggCrackStage)
                     .frame(width: 76, height: 76)
                     .background(Color.secondary.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .rotationEffect(.degrees(eggImminent && eggWiggle ? 5 : (eggImminent ? -5 : 0)))
+                    // One-shot wobble when a new crack appears; runs once per trigger change, never in a loop.
+                    .keyframeAnimator(initialValue: 0.0, trigger: crackWobble) { sprite, angle in
+                        sprite.rotationEffect(.degrees(angle))
+                    } keyframes: { _ in
+                        KeyframeTrack {
+                            LinearKeyframe(-9.0, duration: 0.06)
+                            LinearKeyframe(9.0, duration: 0.10)
+                            LinearKeyframe(-5.0, duration: 0.08)
+                            LinearKeyframe(0.0, duration: 0.06)
+                        }
+                    }
+                    .onChange(of: store.eggCrackStage) { old, new in
+                        if new > old { crackWobble += 1 }
+                    }
                     .scaleEffect(celebScale)
                     .overlay(RoundedRectangle(cornerRadius: 12).fill(.white).opacity(flashOpacity))
                     .overlay(alignment: .topTrailing) {
@@ -1811,6 +1835,16 @@ struct PokemonDetailView: View {
                 valuePair(store.l.level, "\(profile.level)")
                 valuePair(store.l.gender, store.l.genderLabel(profile.gender))
                 valuePair(store.l.nature, entry.nature?.name(store.language) ?? "—")
+            }
+            if let prayers = entry.prayers, prayers.count > 0 {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.l.prayerBornWith(prayers.count)).font(.callout)
+                    if prayers.wasFutile {
+                        Text(store.l.prayerFutileNote(purchased: prayers.eggWasPurchased))
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(store.l.ability).font(.system(size: 11)).foregroundStyle(.secondary)

@@ -250,6 +250,8 @@ final class CompanionStore {
     var isEgg: Bool { state.active == nil }
     var eggStarted: Bool { state.eggUsage > 0 }
     var eggProgress: Double { min(1, max(0, Double(state.eggUsage) / Double(eggHatchThreshold))) }
+    /// How cracked the egg looks (0 while a Pokémon is being raised).
+    var eggCrackStage: Int { isEgg ? EggCracks.stage(forProgress: eggProgress) : 0 }
     var eggTokensToHatch: Int { max(0, eggHatchThreshold - state.eggUsage) }
     /// 알이 부화 준비(100%)가 되었으나 PokéAPI 요청/후보 선택 실패로 다음 갱신을 기다리는 상태.
     private(set) var isHatchRetryDelayed = false
@@ -329,7 +331,8 @@ final class CompanionStore {
                 Dictionary(uniqueKeysWithValues:
                     active.pathIDs.compactMap { id in line.names[id].map { (id, $0) } })
             },
-            form: active.form
+            form: active.form,
+            prayers: active.prayers
         )
     }
 
@@ -360,7 +363,7 @@ final class CompanionStore {
                 Dictionary(uniqueKeysWithValues:
                     chain.compactMap { id in line.names[id].map { (id, $0) } })
             },
-            releasedAt: now, form: a.form)
+            releasedAt: now, form: a.form, prayers: a.prayers)
     }
 
     var dexEntries: [DexEntry] {
@@ -1050,7 +1053,7 @@ final class CompanionStore {
                                   names: currentLine.map { line in   // 체인 각 종의 다국어 이름 저장(표시 즉시)
                                       Dictionary(uniqueKeysWithValues:
                                           a.pathIDs.compactMap { id in line.names[id].map { (id, $0) } })
-                                  }, form: a.form))
+                                  }, form: a.form, prayers: a.prayers))
         let name = formDisplayName(currentLine?.localizedName(finalID, state.language) ?? "",
                                    speciesID: finalID, form: a.form)
         justGraduated = name
@@ -1061,6 +1064,7 @@ final class CompanionStore {
         activeGeneration += 1
         currentLine = nil
         state.eggUsage = 0   // 새 알은 처음부터 인큐베이션
+        state.resetEggPrayers()
         isHatchRetryDelayed = false
         // eggTier 는 손대지 않는다 — 여기 도달했다는 건 활성 포켓몬이 있었다는 뜻이라 보증은 이미 nil 이다
         // (부화가 소비, 디스크/불러오기는 sanitized 가 정규화). 소비 지점은 hatchCore 한 곳으로 유지한다.
@@ -1303,6 +1307,7 @@ final class CompanionStore {
         activeGeneration += 1
         currentLine = nil
         state.eggUsage = 0            // 새 알은 처음부터 인큐베이션(재부화에 5M 필요)
+        state.resetEggPrayers(purchased: true)
         isHatchRetryDelayed = false
         state.eggTier = tier          // 등급 보증(nil = 보증 없음)
         state.pendingHatchID = nil    // 새 보증으로 처음부터 롤(활성 포켓몬이 있는 동안엔 원래 비어 있다)
@@ -1313,6 +1318,17 @@ final class CompanionStore {
         Task { await self.ensureEggPrefetch() }   // 다음 부화 예열
         save()
         return true
+    }
+
+    /// Pray over the egg. A placebo: it only counts, and never touches an RNG or a roll — the species is
+    /// usually already in `pendingHatchID` (prefetched at purchase), which the record remembers.
+    func pray() {
+        guard state.active == nil else { return }
+        var record = state.eggPrayers ?? PrayerRecord(count: 0, wasFutile: state.pendingHatchID != nil,
+                                                      eggWasPurchased: state.eggWasPurchased)
+        record.count += 1
+        state.eggPrayers = record
+        save()
     }
 
     // 보증 없는 기본 알 래퍼 — 기존 호출부/테스트 호환.
@@ -1667,6 +1683,8 @@ final class CompanionStore {
         let overflow = max(0, state.eggUsage - eggHatchThreshold)
         state.eggUsage = 0
         state.eggTier = nil   // 보증은 이 부화로 소비된다(다음 알은 다시 무보증)
+        let prayers = state.eggPrayers   // 부화체에 옮기고 알 쪽은 비운다
+        state.resetEggPrayers()
         // 개체 롤 — shiny(1/64, 부적 1/48)·성격(25종)은 부화 순간 확정, 진화해도 유지.
         // 알림 문구는 이 판정과 같은 분모를 보여준다.
         let shinyOdds = shinyDenominator
@@ -1690,12 +1708,18 @@ final class CompanionStore {
         state.active = MonState(baseID: line.baseID, pathIDs: [line.baseID], plannedPathIDs: evolutionPlan,
                                 stageIndex: 0, usedAtStage: 0, rarity: line.rarity, totalForms: evolutionPlan.count,
                                 isShiny: isShiny, nature: nature, profile: profile, hasGrowthBoost: hasGrowthBoost,
-                                dittoDisguise: dittoDisguise, form: form)
+                                dittoDisguise: dittoDisguise, form: form, prayers: prayers)
         AppLog.write("hatch: base=\(line.baseID) rarity=\(line.rarity) shiny=\(isShiny) forms=\(evolutionPlan.count) boost=\(hasGrowthBoost) ditto=\(dittoDisguise != nil)")
         let name = formDisplayName(line.localizedName(line.baseID, state.language),
                                    speciesID: line.baseID, form: form)
-        notifyCompanionEvent(showShiny ? l.notifShinyHatchTitle : l.notifHatchTitle,
-                             showShiny ? l.notifShinyHatchBody(name, odds: shinyOdds) : l.notifHatchBody(name))
+        let hatchBody: String
+        if let prayers, prayers.count > 0 {
+            hatchBody = l.notifPrayerHatchBody(name, prayers: prayers.count, shiny: showShiny,
+                                               rarity: line.rarity)
+        } else {
+            hatchBody = showShiny ? l.notifShinyHatchBody(name, odds: shinyOdds) : l.notifHatchBody(name)
+        }
+        notifyCompanionEvent(showShiny ? l.notifShinyHatchTitle : l.notifHatchTitle, hatchBody)
         justEvolvedTo = nil        // 새 부화는 "성장" 문구(진화 아님) — 직전 진화명이 남아 표시되지 않게
         displayState = .levelUp
         eventUntil = clock().addingTimeInterval(4)
