@@ -657,7 +657,7 @@ struct FloatingPetView: View {
                 // Hearts hug the visible top of the sprite (not its box). Insertion pops in; removal is
                 // instant, because the panel shrinks at the same moment and a fading bubble would be
                 // drawn lower, over the pet.
-                .overlayPreferenceValue(SpriteVisibleTopKey.self) { visibleTop in
+                .overlayPreferenceValue(SpriteVisibleTopKey.self, alignment: .top) { visibleTop in
                     if hearts.isShowing, store.currentBubbleAlert == nil {
                         HeartBubbleView(l: L(companion.language))
                             .offset(y: SpriteVisibleTop.bubbleTopOffset(

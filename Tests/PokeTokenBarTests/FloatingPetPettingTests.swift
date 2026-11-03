@@ -216,7 +216,7 @@ final class FloatingPetPettingRenderingTests: XCTestCase {
                     SpriteView(speciesID: nil, size: petSize, animated: false, shiny: false,
                                reportsVisibleTop: true)
                         .frame(width: petSize, height: petSize)
-                        .overlayPreferenceValue(SpriteVisibleTopKey.self) { visibleTop in
+                        .overlayPreferenceValue(SpriteVisibleTopKey.self, alignment: .top) { visibleTop in
                             HeartBubbleView(l: l)
                                 .offset(y: SpriteVisibleTop.bubbleTopOffset(
                                     visibleTop: visibleTop ?? 0, bubbleHeight: HeartBubbleArt.height,
