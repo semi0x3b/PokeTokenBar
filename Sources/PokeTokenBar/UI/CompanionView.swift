@@ -90,6 +90,12 @@ struct SpriteSubject: Equatable {
     }
 }
 
+/// Distance from a `SpriteView` box top to the sprite's visible top; emitted only on request.
+struct SpriteVisibleTopKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
+}
+
 /// 스프라이트 1개(런타임 로드 + 캐시). 없으면 알 글리프. bob 으로 가벼운 상하 움직임.
 /// animated=true 면 Gen-V GIF 프레임을 순환(미지원/오프라인이면 정적+bob 으로 폴백).
 @MainActor
@@ -109,6 +115,8 @@ struct SpriteView: View {
     var form: PokemonForm? = nil
     /// Crack stage drawn over the egg sprite (`EggCracks.stage`); ignored for a hatched Pokémon.
     var eggCrackStage = 0
+    /// Emit `SpriteVisibleTopKey` so an overlay can sit on the visible sprite instead of its box.
+    var reportsVisibleTop = false
     private let spriteStore: SpriteStore
     @State private var subject: SpriteSubject
     @State private var up = false
@@ -117,8 +125,9 @@ struct SpriteView: View {
 
     init(speciesID: Int?, size: CGFloat = 84, bob: Bool = false, animated: Bool = false,
          shiny: Bool = false, minFrameDelay: TimeInterval = 0, spriteStore: SpriteStore = .shared,
-         form: PokemonForm? = nil, eggCrackStage: Int = 0) {
+         form: PokemonForm? = nil, eggCrackStage: Int = 0, reportsVisibleTop: Bool = false) {
         self.eggCrackStage = eggCrackStage
+        self.reportsVisibleTop = reportsVisibleTop
         self.speciesID = speciesID
         self.spriteStore = spriteStore
         self.size = size
@@ -204,6 +213,15 @@ struct SpriteView: View {
             .frame(width: size, height: size)
     }
 
+    /// Union over the animation frames (the topmost of them), so the anchor does not jitter per frame.
+    private var visibleTop: CGFloat? {
+        guard reportsVisibleTop else { return nil }
+        let images = frames.isEmpty ? (subject.image.map { [$0] } ?? []) : frames.map(\.image)
+        guard let first = images.first else { return nil }
+        let fraction = images.map(SpriteVisibleTop.opaqueTopFraction).min() ?? 0
+        return SpriteVisibleTop.inset(box: size, imageSize: first.size, opaqueTopFraction: fraction)
+    }
+
     var body: some View {
         Group {
             if !frames.isEmpty {
@@ -282,6 +300,7 @@ struct SpriteView: View {
             guard bob else { return }
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { up = true }
         }
+        .preference(key: SpriteVisibleTopKey.self, value: visibleTop)
     }
 }
 

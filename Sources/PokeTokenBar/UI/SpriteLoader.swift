@@ -329,3 +329,53 @@ enum SpriteFit {
         return CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
     }
 }
+
+/// Where a sprite's visible top sits inside its square box, so overlays can hug the Pokémon
+/// instead of the (often emptier) box. Most Gen-V canvases do not fill the box.
+enum SpriteVisibleTop {
+    private static let alphaThreshold: UInt8 = 16
+    /// Opaque-row scan results, per decoded image. Frames and the egg are decoded once, then reused.
+    nonisolated(unsafe) private static let cache = NSCache<NSImage, NSNumber>()
+
+    /// Distance (pt) from the box top to the first visible row of an image that is aspect-fit
+    /// and centred in a `box`×`box` slot. `opaqueTopFraction` is the share of the image height
+    /// above its first opaque row (0 = the sprite touches the canvas top).
+    static func inset(box: CGFloat, imageSize: CGSize, opaqueTopFraction: CGFloat) -> CGFloat {
+        let fit = SpriteFit.size(for: imageSize, box: box)
+        return (box - fit.height) / 2 + min(max(opaqueTopFraction, 0), 1) * fit.height
+    }
+
+    /// Y of a bubble's top edge, measured from the box top, so its tail tip lands `overlap` pt
+    /// below the sprite's visible top.
+    static func bubbleTopOffset(visibleTop: CGFloat, bubbleHeight: CGFloat, overlap: CGFloat) -> CGFloat {
+        visibleTop + overlap - bubbleHeight
+    }
+
+    /// Share of the image height above its first non-transparent row; 0 when it cannot be read.
+    static func opaqueTopFraction(of image: NSImage) -> CGFloat {
+        if let cached = cache.object(forKey: image) { return CGFloat(cached.doubleValue) }
+        let fraction = scanOpaqueTopFraction(of: image)
+        cache.setObject(NSNumber(value: Double(fraction)), forKey: image)
+        return fraction
+    }
+
+    private static func scanOpaqueTopFraction(of image: NSImage) -> CGFloat {
+        var rect = CGRect(origin: .zero, size: image.size)
+        guard let cg = image.cgImage(forProposedRect: &rect, context: nil, hints: nil),
+              cg.width > 0, cg.height > 0,
+              let context = CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8,
+                                      bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = context.data
+        else { return 0 }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        let pixels = data.bindMemory(to: UInt8.self, capacity: cg.width * cg.height * 4)
+        // Memory row 0 is the top row of the drawn image.
+        for row in 0..<cg.height {
+            for column in 0..<cg.width where pixels[(row * cg.width + column) * 4 + 3] > alphaThreshold {
+                return CGFloat(row) / CGFloat(cg.height)
+            }
+        }
+        return 0
+    }
+}
