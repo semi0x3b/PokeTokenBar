@@ -22,9 +22,10 @@ final class PettingDetectorTests: XCTestCase {
 
     func testWiggleTriggers() {
         var detector = PettingDetector()
-        // start, then 4 strokes of 30pt: right, left, right, left = 3 reversals.
-        XCTAssertEqual(triggers([10, 25, 40, 25, 10, 25, 40, 25, 10], detector: &detector), 2,
-                       "third and fourth reversal both qualify")
+        // Four 15pt back-and-forth turns (at samples 3, 5, 7, 9) = 4 reversals.
+        // Every reversal from the third on fires, so a longer wiggle keeps refreshing the bubble.
+        XCTAssertEqual(triggers([10, 25, 40, 25, 10, 25, 40, 25, 10, 25, 40], detector: &detector), 2,
+                       "the third and fourth reversal both qualify")
     }
 
     func testStraightPassDoesNotTrigger() {
@@ -34,8 +35,9 @@ final class PettingDetectorTests: XCTestCase {
 
     func testSlowBackAndForthDoesNotTrigger() {
         var detector = PettingDetector()
-        // Same 30pt strokes, but 0.5 s per sample: reversals fall out of the 1.2 s window.
-        XCTAssertEqual(triggers([10, 40, 10, 40, 10, 40, 10, 40], step: 0.5, detector: &detector), 0)
+        // Same 30pt strokes at 0.8 s per stroke: three reversals span 1.6 s, outside the 1.2 s window.
+        // (0.5 s per stroke is a legitimate 2 Hz wiggle: three reversals in 1.0 s do trigger.)
+        XCTAssertEqual(triggers([10, 40, 10, 40, 10, 40, 10, 40], step: 0.8, detector: &detector), 0)
     }
 
     func testLongPauseResetsState() {
