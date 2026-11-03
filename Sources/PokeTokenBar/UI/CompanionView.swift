@@ -312,6 +312,8 @@ struct EvoLineView: View {
     /// `onOpenDexEntry` it makes the sprites of species in the dex open their Pokédex page.
     var dexLinks: [Int: String] = [:]
     var onOpenDexEntry: ((String) -> Void)? = nil
+    /// Injectable so render tests stay offline and away from the real sprite cache.
+    var spriteStore: SpriteStore = .shared
 
     private static let spacing: CGFloat = 2
     /// 화살표 칸 폭 = 썸네일 × 이 비율. 고정 frame 을 줘 SF Symbol 글리프 폭에 의존하지 않게 한다 —
@@ -493,7 +495,7 @@ struct EvoLineView: View {
                     Group {
                         switch node.content {
                         case .species(let id):
-                            SpriteView(speciesID: id, size: thumb, shiny: shiny, form: form)
+                            SpriteView(speciesID: id, size: thumb, shiny: shiny, spriteStore: spriteStore, form: form)
                         case .mystery:
                             Text("?")
                                 .font(.system(size: thumb * 0.55, weight: .bold, design: .rounded))
@@ -643,6 +645,8 @@ struct CompanionHeader: View {
     let store: CompanionStore
     /// Opens a species' Pokédex detail page (`PopoverNavigation.openDexEntry`). nil = sprites inert.
     var onOpenDexEntry: ((String) -> Void)? = nil
+    /// Injectable so render tests stay offline and away from the real sprite cache.
+    var spriteStore: SpriteStore = .shared
     // 연출 상태 — 부화/진화 순간 흰 플래시 + 스프링 스케일(본가 진화 신 오마주)
     @State private var flashOpacity: Double = 0
     @State private var celebScale: CGFloat = 1
@@ -675,7 +679,8 @@ struct CompanionHeader: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 12) {
                 SpriteView(speciesID: store.currentSpeciesID, size: 76, bob: true, animated: true,
-                           shiny: store.currentIsShiny, form: store.currentForm, back: store.facesBack)
+                           shiny: store.currentIsShiny, spriteStore: spriteStore, form: store.currentForm,
+                           back: store.facesBack)
                     .frame(width: 76, height: 76)
                     .background(Color.secondary.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -796,7 +801,7 @@ struct CompanionHeader: View {
                 EvoLineView(nodes: store.lineNodes, mysteryLabel: store.l.unknownNextEvolution,
                             language: store.language, shiny: store.currentIsShiny,
                             maxWidth: PopoverMetrics.scrollContentWidth, form: store.currentForm,
-                            dexLinks: dexLinks, onOpenDexEntry: onOpenDexEntry)
+                            dexLinks: dexLinks, onOpenDexEntry: onOpenDexEntry, spriteStore: spriteStore)
             }
             if let g = store.justGraduated {
                 Text(store.l.graduated(g))

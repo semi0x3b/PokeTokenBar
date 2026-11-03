@@ -113,7 +113,7 @@ final class SulkStateTests: XCTestCase {
 }
 
 final class IdleDaysTests: XCTestCase {
-    private func ledger(_ series: [DailyUsage]) -> UsageLedger {
+    private func makeLedger(_ series: [DailyUsage]) -> UsageLedger {
         var ledger = UsageLedger()
         ledger.merge(series)
         return ledger
@@ -122,33 +122,57 @@ final class IdleDaysTests: XCTestCase {
     func testCountsConsecutiveIdleDaysBeforeToday() {
         // Sep 1-9: used on the 5th, idle 6-9; today is the 10th.
         let series = (1...9).map { day(dayKey(2026, 9, $0), $0 == 5 ? 100 : 0) }
-        XCTAssertEqual(ledger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 4)
+        XCTAssertEqual(makeLedger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 4)
     }
 
     func testYesterdayActiveMeansZero() {
         let series = [day(dayKey(2026, 9, 8), 0), day(dayKey(2026, 9, 9), 50)]
-        XCTAssertEqual(ledger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 0)
+        XCTAssertEqual(makeLedger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 0)
     }
 
     func testCountStopsAtWhatTheLedgerCovers() {
         // Coverage starts on the 8th: the 6th and 7th are unknown, not idle.
         let series = [day(dayKey(2026, 9, 8), 0), day(dayKey(2026, 9, 9), 0)]
-        XCTAssertEqual(ledger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 2)
+        XCTAssertEqual(makeLedger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 2)
     }
 
     func testUncoveredYesterdayIsUnknown() {
         XCTAssertEqual(UsageLedger().idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 0)
         // First day of a month, nothing from the previous month on record.
         let series = [day(dayKey(2026, 10, 1), 0)]
-        XCTAssertEqual(ledger(series).idleDays(before: noon(2026, 10, 1), calendar: utcCalendar()), 0)
+        XCTAssertEqual(makeLedger(series).idleDays(before: noon(2026, 10, 1), calendar: utcCalendar()), 0)
+    }
+
+    func testADayTheAppNeverScannedStopsTheCount() {
+        // September was last scanned on the 28th (the laptop slept through the 29th and 30th); October
+        // was scanned on the 1st and 2nd. Sep 29/30 sit inside `coveredSince` but nobody saw them.
+        var ledger = makeLedger((1...28).map { day(dayKey(2026, 9, $0), 0) })
+        ledger.merge([day(dayKey(2026, 10, 1), 0), day(dayKey(2026, 10, 2), 0)])
+        XCTAssertTrue(ledger.covers(dayKey(2026, 9, 30)))
+        XCTAssertFalse(ledger.wasScanned(dayKey(2026, 9, 30)))
+        XCTAssertEqual(ledger.idleDays(before: noon(2026, 10, 3), calendar: utcCalendar()), 2)
+        // Yesterday itself unscanned: unknown, not idle.
+        XCTAssertEqual(ledger.idleDays(before: noon(2026, 10, 1), calendar: utcCalendar()), 0)
+    }
+
+    func testScannedCoverageSurvivesSaveAndLoad() {
+        let suite = "SulkLedger-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let saved = makeLedger([day(dayKey(2026, 9, 28), 0), day(dayKey(2026, 9, 29), 0)])
+        saved.save(to: defaults)
+        let loaded = UsageLedger.load(from: defaults)
+        XCTAssertEqual(loaded, saved)
+        XCTAssertTrue(loaded.wasScanned(dayKey(2026, 9, 29)))
+        XCTAssertFalse(loaded.wasScanned(dayKey(2026, 9, 30)))
     }
 
     func testMonthBoundaryReachesIntoThePreviousMonth() {
-        var ledger = ledger([day(dayKey(2026, 9, 29), 0), day(dayKey(2026, 9, 30), 0)])
+        var ledger = makeLedger([day(dayKey(2026, 9, 29), 0), day(dayKey(2026, 9, 30), 0)])
         ledger.merge([day(dayKey(2026, 10, 1), 0), day(dayKey(2026, 10, 2), 0)])
         XCTAssertEqual(ledger.idleDays(before: noon(2026, 10, 3), calendar: utcCalendar()), 4)
         // Used on the last day of September: yesterday on Oct 1 is active.
-        let active = self.ledger([day(dayKey(2026, 9, 30), 70)])
+        let active = makeLedger([day(dayKey(2026, 9, 30), 70)])
         XCTAssertEqual(active.idleDays(before: noon(2026, 10, 1), calendar: utcCalendar()), 0)
     }
 }

@@ -454,6 +454,8 @@ final class PetHostingView: NSHostingView<AnyView> {
 @MainActor
 struct FloatingPetView: View {
     var animated: Bool = true
+    /// Injectable so render tests stay offline and away from the real sprite cache.
+    var spriteStore: SpriteStore = .shared
     @Environment(UsageStore.self) private var store
     @Environment(CompanionStore.self) private var companion
 
@@ -469,7 +471,7 @@ struct FloatingPetView: View {
 
             SpriteView(speciesID: subject.speciesID, size: size, animated: animated,
                        shiny: subject.isShiny,
-                       minFrameDelay: store.animationQuality.frameFloor, form: subject.form,
+                       minFrameDelay: store.animationQuality.frameFloor, spriteStore: spriteStore, form: subject.form,
                        back: companion.facesBack)
                 .frame(width: size, height: size)
                 .zIndex(0)

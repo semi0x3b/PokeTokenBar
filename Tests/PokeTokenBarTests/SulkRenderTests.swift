@@ -1,0 +1,185 @@
+import AppKit
+import SwiftUI
+import XCTest
+@testable import PokeTokenBar
+
+/// Before/after renders for the sulk state. **Skipped unless `PTB_SULK_RENDER_DIR` names a directory:**
+///
+///     PTB_SULK_RENDER_DIR=/some/dir swift test --filter SulkRenderTests
+///
+/// The sprites come from a throwaway `SpriteStore` directory, never the real cache. Pikachu's front and
+/// back sprites are downloaded into it (the runner has network); if a download fails, a labelled
+/// placeholder PNG stands in so the layout is still rendered, and the test log says which one.
+@MainActor
+final class SulkRenderTests: XCTestCase {
+    private static let speciesID = 25
+    private var windows: [NSWindow] = []
+
+    override func tearDown() async throws {
+        windows.forEach { $0.close() }
+        windows = []
+    }
+
+    private func outputDirectory() throws -> URL {
+        guard let path = ProcessInfo.processInfo.environment["PTB_SULK_RENDER_DIR"], !path.isEmpty else {
+            throw XCTSkip("PTB_SULK_RENDER_DIR not set — render only when asked")
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    // MARK: Sprites
+
+    private func placeholderPNG(label: String, color: NSColor) throws -> Data {
+        let side = 96
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        color.setFill()
+        NSBezierPath(roundedRect: NSRect(x: 16, y: 16, width: 64, height: 64), xRadius: 12, yRadius: 12).fill()
+        (label as NSString).draw(at: NSPoint(x: 26, y: 40), withAttributes: [
+            .font: NSFont.boldSystemFont(ofSize: 14), .foregroundColor: NSColor.white])
+        NSGraphicsContext.restoreGraphicsState()
+        return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    }
+
+    /// A private sprite directory holding Pikachu front and back; reports which came from the network.
+    private func spriteStore() async throws -> SpriteStore {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sulk-render-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = SpriteStore(directory: directory)
+        for back in [false, true] {
+            let id = Self.speciesID
+            let gif = await store.data(speciesID: id, animated: true, back: back)
+            let png = await store.data(speciesID: id, animated: false, back: back)
+            print("sulk-render sprite \(back ? "back" : "front"): gif=\(gif != nil) png=\(png != nil)")
+            if png == nil {
+                let key = SpriteStore.cacheKey(speciesID: id, animated: false, shiny: false, back: back)
+                let placeholder = try placeholderPNG(label: back ? "BACK" : "FRONT",
+                                                     color: back ? .systemOrange : .systemBlue)
+                try placeholder.write(to: directory.appendingPathComponent(key + ".png"))
+                print("sulk-render sprite \(back ? "back" : "front"): PLACEHOLDER (download failed)")
+            }
+        }
+        return store
+    }
+
+    // MARK: Stores
+
+    private final class ClockBox: @unchecked Sendable {
+        nonisolated(unsafe) var now = Date(timeIntervalSince1970: 1_700_000_000)
+    }
+
+    /// An active Pikachu whose state is driven through `update`, exactly as the app does it.
+    private func makeCompanion(language: AppLanguage, sulking: Bool) async throws -> CompanionStore {
+        let clock = ClockBox()
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("sulk-render-\(UUID()).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        let suite = "SulkRender-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let names = [Self.speciesID: ["en": "Pikachu", "ko": "피카츄"]]
+        let line = EvoLine(baseID: Self.speciesID, tree: EvoNode(speciesID: Self.speciesID, children: []),
+                           rarity: .common, names: names)
+        let store = CompanionStore(provider: StubProvider(value: line), clock: { clock.now },
+                                   fileURL: file, rng: SeededRNG(seed: 5), defaults: defaults)
+        store.setLanguage(language)
+        await store.hatch(baseID: Self.speciesID)
+        clock.now = clock.now.addingTimeInterval(60)   // let the hatch event window expire
+        store.update(todayTokensByProvider: ["test": 0], todayDate: "d", monthTotal: 0, burnTier: .idle,
+                     limitWarning: false, hasUsageData: true, idleDaysBeforeToday: sulking ? 3 : 0)
+        XCTAssertEqual(store.displayState, sulking ? .sulk : .sleep)
+        return store
+    }
+
+    // MARK: Hosting
+
+    private func mount<V: View>(_ view: V, width: CGFloat, height: CGFloat) -> NSHostingView<AnyView> {
+        let host = NSHostingView(rootView: AnyView(
+            view.frame(width: width, height: height).background(Color.white).environment(\.colorScheme, .light)))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: width, height: height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = host
+        window.orderFront(nil)
+        windows.append(window)
+        return host
+    }
+
+    /// Lets the sprite `.task` finish (cached file → GIF/PNG decode), then snapshots at 2x.
+    private func snapshot(_ host: NSView) async throws -> Data {
+        for _ in 0..<40 {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let bounds = host.bounds
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(bounds.width * 2), pixelsHigh: Int(bounds.height * 2),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        rep.size = bounds.size
+        host.cacheDisplay(in: bounds, to: rep)
+        return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    }
+
+    // MARK: Renders
+
+    func testRenderPopoverHomeCardSleepVersusSulk() async throws {
+        let directory = try outputDirectory()
+        let sprites = try await spriteStore()
+        for language in [AppLanguage.ko, .en] {
+            var images: [Bool: Data] = [:]
+            for sulking in [false, true] {
+                let store = try await makeCompanion(language: language, sulking: sulking)
+                let host = mount(CompanionHeader(store: store, spriteStore: sprites), width: PopoverMetrics.contentWidth,
+                                 height: 150)
+                let png = try await snapshot(host)
+                images[sulking] = png
+                let name = "popover-home-\(sulking ? "sulk-back" : "sleep-front")-\(language.rawValue).png"
+                try png.write(to: directory.appendingPathComponent(name))
+                print("wrote \(name) (\(png.count) bytes)")
+            }
+            XCTAssertNotEqual(images[false], images[true], "\(language): sulk must change the rendered pixels")
+        }
+    }
+
+    func testRenderFloatingPetAndHoverTextNormalVersusSulk() async throws {
+        let directory = try outputDirectory()
+        let sprites = try await spriteStore()
+        for language in [AppLanguage.ko, .en] {
+            var images: [Bool: Data] = [:]
+            for sulking in [false, true] {
+                let companion = try await makeCompanion(language: language, sulking: sulking)
+                let suite = "SulkRenderUsage-\(UUID())"
+                let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+                addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+                let usage = UsageStore(providers: [], autoRefresh: false, defaults: defaults)
+                // The same text the hover callout shows; the chrome here only approximates the NSPanel's.
+                let hover = FloatingPetView.hoverTooltip(
+                    todayTokens: 0, limitUtilization: nil, mode: usage.limitDisplayMode,
+                    l: L(language), sulkDays: companion.sulkDays)
+                let view = VStack(spacing: 8) {
+                    Text(hover).font(.system(size: 11))
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .windowBackgroundColor)))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
+                    FloatingPetView(spriteStore: sprites)
+                        .environment(usage).environment(companion)
+                        .frame(width: 96, height: 96)
+                }
+                let host = mount(view, width: 240, height: 170)
+                let png = try await snapshot(host)
+                images[sulking] = png
+                let name = "floating-pet-\(sulking ? "sulk-back-with-hover" : "normal-with-hover")-\(language.rawValue).png"
+                try png.write(to: directory.appendingPathComponent(name))
+                print("wrote \(name) (\(png.count) bytes) hover=\(hover)")
+            }
+            XCTAssertNotEqual(images[false], images[true], "\(language): sulk must change the rendered pixels")
+        }
+    }
+}
