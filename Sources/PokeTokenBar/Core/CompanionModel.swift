@@ -453,8 +453,11 @@ enum PokemonOdds {
 /// Purely cosmetic: no roll (species, rarity, shiny, nature, form, profile) ever reads it.
 struct PrayerRecord: Codable, Sendable, Equatable {
     var count: Int
-    /// The species was already rolled (`pendingHatchID != nil`) when the first prayer was said.
+    /// The species was already rolled (`pendingHatchID != nil`) when the first prayer was said. Cleared at hatch
+    /// when a different species hatched (`rolledSpeciesID`) or the hatch turned out to be a Ditto.
     var wasFutile: Bool
+    /// That pre-rolled species. Compared with the hatched one: the tier guard can discard a pre-roll and re-roll.
+    var rolledSpeciesID: Int? = nil
     /// The egg came from `buyEgg`; otherwise it arrived by itself (first egg, graduation).
     var eggWasPurchased: Bool
 }

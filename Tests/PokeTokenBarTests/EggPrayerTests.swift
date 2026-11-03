@@ -76,7 +76,7 @@ final class EggPrayerTests: XCTestCase {
     func testPrayCountsAndRemembersFutility() {
         let futile = hatchReadyEgg(pending: true, purchased: true)
         futile.pray(); futile.pray(); futile.pray()
-        XCTAssertEqual(futile.state.eggPrayers, PrayerRecord(count: 3, wasFutile: true, eggWasPurchased: true))
+        XCTAssertEqual(futile.state.eggPrayers, PrayerRecord(count: 3, wasFutile: true, rolledSpeciesID: 1, eggWasPurchased: true))
 
         let early = hatchReadyEgg(pending: false)
         early.pray()
@@ -112,7 +112,8 @@ final class EggPrayerTests: XCTestCase {
         let store = hatchReadyEgg(pending: true, purchased: true)
         store.pray(); store.pray()
         await store.hatchIfNeeded()
-        XCTAssertEqual(store.state.active?.prayers, PrayerRecord(count: 2, wasFutile: true, eggWasPurchased: true))
+        XCTAssertEqual(store.state.active?.prayers,
+                       PrayerRecord(count: 2, wasFutile: true, rolledSpeciesID: 1, eggWasPurchased: true))
         XCTAssertNil(store.state.eggPrayers)
         XCTAssertFalse(store.state.eggWasPurchased)
     }
@@ -437,16 +438,10 @@ final class EggPrayerTests: XCTestCase {
 
     // MARK: Ditto: the disguise is rolled at hatch, so the species note must not outlive the reveal
 
-    /// A seed whose hatch rolls (shiny, nature, Ditto disguise) end in a disguised Ditto.
-    private func disguisingSeed(shiny: Bool) throws -> UInt64 {
-        for candidate: UInt64 in 0..<2_000_000 {
-            var rng = SeededRNG(seed: candidate)
-            let shinyRoll = rng.next(); _ = rng.next(); let dittoRoll = rng.next()
-            let isShiny = shinyRoll % PokemonOdds.shinyDenominator == 0
-            if dittoRoll % PokemonOdds.dittoDisguiseDenominator == 0 && isShiny == shiny { return candidate }
-        }
-        throw XCTSkip("no seed found")
-    }
+    /// Seeds found once with a plain script using this RNG and the hatch roll order (shiny, nature, Ditto disguise):
+    /// both end in a disguised Ditto; 2466 also rolls shiny (1/64 * 1/128 of seeds, hence not searched at test time).
+    private static let disguisedDittoSeed: UInt64 = 239
+    private static let shinyDisguisedDittoSeed: UInt64 = 2466
 
     private func prayedDisguisedDitto(shiny: Bool = false) async throws -> CompanionStore {
         let url = tempURL()
@@ -454,7 +449,7 @@ final class EggPrayerTests: XCTestCase {
             + "\"active\":null,\"dex\":[],\"collectedFinals\":[],\"pendingHatchID\":1,\"eggWasPurchased\":true}"
         try Data(json.utf8).write(to: url)
         let store = CompanionStore(provider: DisguiseTestProvider(), clock: { self.now }, fileURL: url,
-                                   rng: SeededRNG(seed: try disguisingSeed(shiny: shiny)),
+                                   rng: SeededRNG(seed: shiny ? Self.shinyDisguisedDittoSeed : Self.disguisedDittoSeed),
                                    dittoDisguiseRollingEnabled: true)
         store.pray(); store.pray()
         await store.hatch(baseID: 1)
@@ -464,7 +459,7 @@ final class EggPrayerTests: XCTestCase {
 
     func testADisguisedDittoKeepsItsPrayersAndTheSpeciesNoteLooksLikeAnyOtherEgg() async throws {
         let store = try await prayedDisguisedDitto()
-        let record = PrayerRecord(count: 2, wasFutile: true, eggWasPurchased: true)
+        let record = PrayerRecord(count: 2, wasFutile: true, rolledSpeciesID: 1, eggWasPurchased: true)
         XCTAssertEqual(store.state.active?.prayers, record)
         XCTAssertEqual(store.dexEntries.first?.prayers, record,
                        "the detail page reads this entry; the disguise species was fixed at purchase, so the note is true")
@@ -481,6 +476,35 @@ final class EggPrayerTests: XCTestCase {
         XCTAssertEqual(store.state.active?.prayers?.count, 2)
         XCTAssertEqual(store.state.active?.prayers?.wasFutile, false, "the Ditto was rolled at hatch, not at purchase")
         XCTAssertEqual(store.dexEntries.first?.prayers?.wasFutile, false)
+    }
+
+
+    // MARK: the species note only holds if the pre-rolled species is the one that hatched
+
+    private func prayedEgg(pendingSpecies: Int) throws -> CompanionStore {
+        let url = tempURL()
+        let json = "{\"installBaselineSet\":true,\"usedSinceInstall\":2000000000,\"lastDate\":\"d\","
+            + "\"active\":null,\"dex\":[],\"collectedFinals\":[],\"pendingHatchID\":\(pendingSpecies)}"
+        try Data(json.utf8).write(to: url)
+        let store = CompanionStore(provider: DisguiseTestProvider(), clock: { self.now }, fileURL: url,
+                                   rng: SeededRNG(seed: 7))
+        store.pray()
+        return store
+    }
+
+    func testTheNoteSurvivesWhenThePreRolledSpeciesHatches() async throws {
+        let store = try prayedEgg(pendingSpecies: 1)
+        XCTAssertEqual(store.state.eggPrayers?.rolledSpeciesID, 1)
+        await store.hatch(baseID: 1)
+        XCTAssertEqual(store.state.active?.prayers?.wasFutile, true)
+    }
+
+    func testTheNoteIsDroppedWhenAnotherSpeciesHatchesAfterAReroll() async throws {
+        let store = try prayedEgg(pendingSpecies: 1)
+        await store.hatch(baseID: 132)   // e.g. the tier guard threw the pre-roll away and rolled again
+        XCTAssertEqual(store.state.active?.baseID, 132)
+        XCTAssertEqual(store.state.active?.prayers?.wasFutile, false)
+        XCTAssertEqual(store.state.active?.prayers?.count, 1)
     }
 
 }
