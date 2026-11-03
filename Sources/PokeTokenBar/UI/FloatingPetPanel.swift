@@ -16,8 +16,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private var displayAwake = true
     private var builtAnimated: Bool?
     private var powerObserver: NSObjectProtocol?
-    /// 0 = no hearts; 1...`maxHeartLevel` = hearts currently shown after a stroke.
-    private var heartLevel = 0
+    private let hearts = PetHeartState()
     private var heartExpiry: Task<Void, Never>?
     private var isHovering = false
 
@@ -230,7 +229,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     }
 
     private var showingBubble: Bool {
-        Self.isShowingBubble(alertActive: store.currentBubbleAlert != nil, heartLevel: heartLevel)
+        Self.isShowingBubble(alertActive: store.currentBubbleAlert != nil, heartLevel: hearts.level)
     }
 
     private func show() {
@@ -238,7 +237,9 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         panel = p
         let wantAnimated = Self.shouldAnimate(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if p.contentView == nil || builtAnimated != wantAnimated {
-            let hosting = PetHostingView(rootView: AnyView(EmptyView()))
+            let hosting = PetHostingView(rootView: AnyView(
+                FloatingPetView(animated: wantAnimated, hearts: hearts)
+                    .environment(store).environment(companion)))
             hosting.onOpenPopover = onOpenPopover
             hosting.onHide = onHide
             hosting.languageProvider = { [weak self] in self?.companion.language ?? .systemDefault }
@@ -253,9 +254,6 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         if let hosting = p.contentView as? PetHostingView {
             hosting.toolTip = currentHoverText()
             hosting.strokeDistance = max(10, CGFloat(store.floatingPetSize) * 0.15)
-            hosting.rootView = AnyView(
-                FloatingPetView(animated: wantAnimated, heartLevel: heartLevel)
-                    .environment(store).environment(companion))
         }
         let petSize = CGFloat(store.floatingPetSize)
         p.setFrame(targetFrame(petSize: petSize, showingBubble: showingBubble), display: true)
@@ -264,8 +262,8 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     }
 
     private func petWasStroked() {
-        heartLevel = Self.heartLevel(after: heartLevel, alertActive: store.currentBubbleAlert != nil)
-        guard heartLevel > 0 else { return }
+        hearts.level = Self.heartLevel(after: hearts.level, alertActive: store.currentBubbleAlert != nil)
+        guard hearts.level > 0 else { return }
         hideHoverCallout()
         sync()
         // One-shot expiry, restarted by every stroke; no standing timer.
@@ -273,7 +271,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         heartExpiry = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.heartDuration)
             guard !Task.isCancelled, let self else { return }
-            self.heartLevel = 0
+            self.hearts.level = 0
             self.sync()
             if self.isHovering { self.showHoverCallout() }
         }
@@ -281,7 +279,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     private func hide() {
         heartExpiry?.cancel()
-        heartLevel = 0
+        hearts.level = 0
         hideHoverCallout()
         guard let p = panel else { return }
         p.orderOut(nil)
@@ -447,7 +445,9 @@ final class PetHostingView: NSHostingView<AnyView> {
 
     /// Tracking-area `mouseMoved` only arrives with no button pressed, so drags never count as strokes.
     override func mouseMoved(with event: NSEvent) {
-        let x = convert(event.locationInWindow, from: nil).x
+        // Screen coordinates: the panel widens and re-centres when hearts appear, which would
+        // shift view-local x mid-gesture and fake or break a stroke.
+        let x = NSEvent.mouseLocation.x
         if petting.feed(x: x, at: event.timestamp, minStroke: strokeDistance) { onStroke?() }
     }
 
@@ -511,8 +511,8 @@ final class PetHostingView: NSHostingView<AnyView> {
 @MainActor
 struct FloatingPetView: View {
     var animated: Bool = true
-    /// Hearts shown above the pet after a stroke (0 = none). A limit alert takes precedence.
-    var heartLevel: Int = 0
+    /// Hearts shown above the pet after a stroke. A limit alert takes precedence.
+    let hearts: PetHeartState
     @Environment(UsageStore.self) private var store
     @Environment(CompanionStore.self) private var companion
 
@@ -524,8 +524,8 @@ struct FloatingPetView: View {
                 SpeechBubbleView(alert: alert, l: L(companion.language))
                     .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
                     .zIndex(1)
-            } else if heartLevel > 0 {
-                HeartBubbleView(count: heartLevel, l: L(companion.language))
+            } else if hearts.level > 0 {
+                HeartBubbleView(count: hearts.level, l: L(companion.language))
                     .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
                     .zIndex(1)
             }
@@ -540,7 +540,7 @@ struct FloatingPetView: View {
         .animation(animated ? .spring(response: 0.3, dampingFraction: 0.7) : nil,
                    value: store.currentBubbleAlert)
         .animation(animated ? .spring(response: 0.3, dampingFraction: 0.7) : nil,
-                   value: heartLevel)
+                   value: hearts.level)
     }
 
     static func hoverTooltip(todayTokens: Int, limitUtilization: Double?,
@@ -552,6 +552,13 @@ struct FloatingPetView: View {
         }
         return l.floatingPetHoverTokensOnly(usage)
     }
+}
+
+/// Hearts currently shown above the pet (0 = none; up to `maxHeartLevel`).
+/// Owned by the controller so the hosted view is built once and only observes this.
+@MainActor @Observable
+final class PetHeartState {
+    var level = 0
 }
 
 /// Detects a back-and-forth stroking motion from horizontal mouse samples. Pure, so it is

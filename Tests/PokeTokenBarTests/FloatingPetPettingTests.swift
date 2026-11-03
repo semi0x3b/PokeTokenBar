@@ -146,8 +146,10 @@ final class FloatingPetPettingRenderingTests: XCTestCase {
             ("light", ColorScheme.light, NSColor(calibratedWhite: 0.78, alpha: 1)),
             ("dark", ColorScheme.dark, NSColor(calibratedWhite: 0.16, alpha: 1)),
         ] {
-            for (label, hearts) in [("before", 0), ("after", 3)] {
-                let host = NSHostingView(rootView: FloatingPetView(animated: false, heartLevel: hearts)
+            for (label, level) in [("before", 0), ("after", 3)] {
+                let hearts = PetHeartState()
+                hearts.level = level
+                let host = NSHostingView(rootView: FloatingPetView(animated: false, hearts: hearts)
                     .environment(store).environment(companion)
                     .environment(\.colorScheme, scheme)
                     .frame(width: canvas.width, height: canvas.height)
