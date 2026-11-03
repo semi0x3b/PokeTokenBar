@@ -210,6 +210,17 @@ struct SettingsView: View {
             }
             Divider()
             groupRow {
+                // Applies to the menu bar, the floating pet and the popover alike, so it sits in the general section.
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(l.turnsBackWhenNeglectedLabel)
+                    Text(l.turnsBackWhenNeglectedHint).font(.caption2).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Toggle(l.turnsBackWhenNeglectedLabel, isOn: $store.turnsBackWhenNeglected)
+                    .labelsHidden().toggleStyle(.switch).controlSize(.small)
+            }
+            Divider()
+            groupRow {
                 Text(l.limitDisplayModeLabel)
                 Spacer()
                 Picker(l.limitDisplayModeLabel, selection: $store.limitDisplayMode) {

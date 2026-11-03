@@ -301,6 +301,8 @@ struct L {
           "Flüssigere Animationen verbrauchen mehr Batterie",
           "Чем плавнее, тем больше расход батареи")
     }
+    var turnsBackWhenNeglectedLabel: String { t("방치하면 등 돌리기", "Turn its back when neglected", "放置すると背を向ける", "Darle la espalda si lo descuidas", "Tourner le dos si négligé", "Virar as costas se negligenciado", "Wendet sich bei Vernachlässigung ab", "Отворачиваться, если забросить") }
+    var turnsBackWhenNeglectedHint: String { t("이틀 연속 쓰지 않으면 뒷모습으로 보여요", "Shows its back after two days without usage", "2日続けて使わないと後ろ姿になります", "Se muestra de espaldas tras dos días sin uso", "Se montre de dos après deux jours sans usage", "Aparece de costas após dois dias sem uso", "Zeigt nach zwei Tagen ohne Nutzung den Rücken", "Показывает спину после двух дней без использования") }
     var animationPowerSaver: String { t("배터리 절약", "Power saver", "バッテリー優先", "Ahorro de batería", "Économie d'énergie", "Economia de bateria", "Energiesparmodus", "Экономия энергии") }
     var animationBalanced: String { t("기본", "Balanced", "標準", "Equilibrado", "Équilibré", "Equilibrado", "Ausgewogen", "Баланс") }
     var animationSmooth: String { t("부드럽게", "Smooth", "滑らか", "Fluido", "Fluide", "Fluido", "Flüssig", "Плавность") }

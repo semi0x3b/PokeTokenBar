@@ -161,6 +161,10 @@ final class UsageStore {
     var floatingPetEnabled: Bool {
         didSet { defaults.set(floatingPetEnabled, forKey: "floatingPetEnabled") }
     }
+    /// The companion turns its back after two idle days (menu bar, floating pet, popover). Default on.
+    var turnsBackWhenNeglected: Bool {
+        didSet { defaults.set(turnsBackWhenNeglected, forKey: "turnsBackWhenNeglected") }
+    }
     /// 플로팅 펫 스프라이트 한 변 크기(pt).
     var floatingPetSize: Double {
         didSet { defaults.set(floatingPetSize, forKey: "floatingPetSize") }
@@ -506,9 +510,10 @@ final class UsageStore {
     private(set) var ledgerScannedThisSession = false
 
     /// Consecutive zero-usage days directly before today, as far as this session's scan can prove.
-    /// 0 when unknown (scan not done, day not covered) — unknown is never treated as idle.
+    /// 0 when unknown (scan not done, day not covered) — unknown is never treated as idle — and when the
+    /// user turned the option off, so the companion never sulks and the hover text never appears.
     var idleDaysBeforeToday: Int {
-        ledgerScannedThisSession ? dailyLedger.idleDays(before: Date()) : 0
+        turnsBackWhenNeglected && ledgerScannedThisSession ? dailyLedger.idleDays(before: Date()) : 0
     }
 
     private func recordDailyLedger() {
@@ -811,6 +816,7 @@ final class UsageStore {
         updateNotificationsEnabled = d.object(forKey: "updateNotificationsEnabled") as? Bool ?? true
         statusChecksEnabled = d.object(forKey: "statusChecksEnabled") as? Bool ?? true
         floatingPetEnabled = d.object(forKey: "floatingPetEnabled") as? Bool ?? false
+        turnsBackWhenNeglected = d.object(forKey: "turnsBackWhenNeglected") as? Bool ?? true
         floatingPetSize = d.object(forKey: "floatingPetSize") as? Double ?? 96
         floatingPetBubbleAlerts = d.object(forKey: "floatingPetBubbleAlerts") as? Bool ?? true
         // 기본 powerSaver — 이 설정이 생기기 전의 고정 캡(0.4s)과 같은 프레임 레이트라, 기존
