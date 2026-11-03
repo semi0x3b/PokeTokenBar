@@ -376,7 +376,7 @@ struct L {
     func floatingPetHoverTokensOnly(_ tokens: String) -> String {
         t("오늘 \(tokens) 토큰", "Today: \(tokens) tokens", "今日: \(tokens) トークン", "Hoy: \(tokens) tokens", "Aujourd'hui : \(tokens) tokens", "Hoje: \(tokens) tokens", "Heute: \(tokens) Tokens", "Токенов сегодня: \(tokens)")
     }
-    /// Sulking for `hours` (24...47) — below that the companion is not sulking yet.
+    /// Sulking for `hours` (3...47) — below that the companion is not sulking yet.
     func floatingPetHoverSulkHours(_ hours: Int) -> String {
         t("\(hours)시간째 삐져 있어요", "Sulking for \(hours) hours", "\(hours)時間ずっと拗ねています", "Enfurruñado desde hace \(hours) horas", "Boude depuis \(hours) heures", "Emburrado há \(hours) horas", "Schmollt seit \(hours) Stunden", "Обижен уже \(hours) ч.")
     }
@@ -1223,6 +1223,7 @@ struct L {
     var statusFocus: String { t("지금은 집중 모드예요.", "In focus mode now.", "今は集中モードです。", "Ahora está en modo concentración.", "En mode concentration.", "Agora está em modo foco.", "Gerade voll konzentriert.", "Сейчас в режиме фокуса.") }
     var statusTired: String { t("한도에 가까워요. 잠깐 쉬어도 괜찮아요.", "Close to the limit. A short break is fine.", "上限が近いです。少し休んでも大丈夫。", "Está cerca del límite. Un pequeño descanso no vendría mal.", "Proche de la limite. Une petite pause ne fait pas de mal.", "Está perto do limite. Uma pausa cai bem.", "Fast am Limit. Eine kurze Pause tut gut.", "Лимит близко. Короткий перерыв не помешает.") }
     var statusSleep: String { t("지금은 자고 있어요.", "Sleeping now.", "今は眠っています。", "Ahora está durmiendo.", "En train de dormir.", "Agora está dormindo.", "Schläft gerade.", "Сейчас спит.") }
+    var backViewLabel: String { t("뒷모습 보기", "Show back view", "後ろ姿を見る", "Ver de espaldas", "Voir de dos", "Ver de costas", "Rückansicht zeigen", "Показывать спину") }
     var statusSulk: String { t("삐져서 등을 돌리고 있어요.", "Sulking with its back turned.", "拗ねて背を向けています。", "Está de espaldas, enfurruñado.", "Boude, le dos tourné.", "Está de costas, emburrado.", "Schmollt mit dem Rücken zu dir.", "Обиделся и отвернулся.") }
     func statusEvolved(_ name: String) -> String { t("\(KoreanParticle.direction.attach(to: name)) 진화했어요!", "Evolved into \(name)!", "\(name) に進化しました！", "¡Evolucionó a \(name)!", "A évolué en \(name) !", "Evoluiu para \(name)!", "Hat sich zu \(name) entwickelt!", "Эволюционировал в \(name)!") }
     var statusGrew: String { t("성장했어요!", "It grew!", "成長しました！", "¡Ha crecido!", "Il a grandi !", "Cresceu!", "Ist gewachsen!", "Подрос!") }

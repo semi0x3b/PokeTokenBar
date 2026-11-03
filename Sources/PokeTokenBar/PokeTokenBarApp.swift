@@ -125,6 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         withObservationTracking {
             _ = store.menuTitle
             _ = store.menuToolTip
+            _ = store.alwaysFacesBack   // mirrored into the companion by `updateCompanion`
             // The mode and thresholds can change the colors while the text stays the same.
             _ = store.menuLimitColorRuns()
         } onChange: { [weak self] in
@@ -248,6 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// UsageStore 값 → CompanionStore (사용량 적립 + 표시 상태). 매 관찰 변경 시 호출.
     private func updateCompanion() {
+        companion.alwaysFacesBack = store.alwaysFacesBack
         companion.update(
             todayTokensByProvider: store.todayTokensByProvider,
             todayDate: LocalUsageReader.todayKey(),
@@ -583,7 +585,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let entries = StatusItemMenu.entries(
             l: companion.l, todayTokens: store.todayTotalTokens,
             todayCost: store.showsCost ? store.todayUsageCost : nil,
-            floatingPetEnabled: store.floatingPetEnabled)
+            floatingPetEnabled: store.floatingPetEnabled, alwaysFacesBack: store.alwaysFacesBack)
         // Attaching the menu only for this click keeps left click on the popover. performClick
         // tracks the menu synchronously, with the button highlighted like any other status menu.
         statusItem.menu = StatusItemMenu.build(entries, target: self, selector: #selector(handleStatusMenu(_:)))
@@ -597,6 +599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         case .openDex: showPopover { $0.openRepresentativeDex() }
         case .openSettings: showPopover { $0.showSettings = true }
         case .toggleFloatingPet: store.floatingPetEnabled.toggle()
+        case .toggleBackView: store.alwaysFacesBack.toggle()
         case .quit: NSApp.terminate(nil)
         case nil: break
         }

@@ -106,7 +106,7 @@ enum Rarity: String, Codable, Sendable {
 /// 형태 k개 라인에서 i번째 형태 성장 비용 = T·i / (k(k+1)/2) → 합 = T, 단계↑일수록 비용↑.
 enum PokemonBalance {
     /// With no token usage for this long the companion turns its back (`CompanionStateKind.sulk`).
-    static let sulkAfterIdle: TimeInterval = 24 * 3600
+    static let sulkAfterIdle: TimeInterval = 3 * 3600
     /// 알 부화 임계 — 이만큼 토큰을 써야 알이 깨진다(즉시 부화 대신 기대감). 초과분은 부화체 성장에 이월.
     static let eggHatchThreshold = 5_000_000
     static let repeatGrowthMultiplier = 2

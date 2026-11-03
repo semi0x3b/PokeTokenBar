@@ -372,6 +372,15 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.floatingPetBubbleAlerts)
     }
 
+    /// Always facing back is a display preference: default off, persisted like the floating pet settings.
+    func testAlwaysFacesBackDefaultsOffAndPersists() {
+        let claude = FakeUsageProvider(id: "claude_code", displayName: "Claude Code", daily: todayDaily(1_000))
+        let store = makeStore(providers: [claude])
+        XCTAssertFalse(store.alwaysFacesBack)
+        store.alwaysFacesBack = true
+        XCTAssertTrue(makeStore(providers: [claude]).alwaysFacesBack, "persists across restarts")
+    }
+
     /// Bubble picker is pure: critical beats warn; within a tier higher utilization wins (stable choice).
     func testBubbleAlertPicksHighestSeverityThenUtilization() {
         let warnLow = UsageStore.LimitAlert(key: "a", window: "A", isCritical: false, utilization: 81)

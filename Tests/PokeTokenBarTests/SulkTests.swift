@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import PokeTokenBar
 
-// "Neglected? It turns its back": sulk state after a day without token usage, its hover text, and
+// "Neglected? It turns its back": sulk state after three hours without token usage, its hover text, and
 // back-sprite URL/cache/fallback. StubProvider / SeededRNG come from CompanionTests.swift.
 
 private let sulkNow = Date(timeIntervalSince1970: 1_700_000_000)
@@ -42,8 +42,30 @@ final class SulkStateTests: XCTestCase {
         XCTAssertEqual(store.sulkIdle, threshold)
     }
 
-    func testThresholdIsTwentyFourHours() {
-        XCTAssertEqual(threshold, 24 * 3600)
+    func testThresholdIsThreeHours() {
+        XCTAssertEqual(threshold, 3 * 3600)
+    }
+
+    func testFacesBackTruthTable() async {
+        let store = await makeStore()
+        for (always, idle, expected) in [(false, 0.0, false), (false, threshold, true),
+                                         (true, 0.0, true), (true, threshold, true)] {
+            store.alwaysFacesBack = always
+            update(store, idle: idle)
+            XCTAssertEqual(store.facesBack, expected, "always=\(always) idle=\(idle)")
+            XCTAssertEqual(store.displayState, idle >= threshold ? .sulk : .sleep,
+                           "the preference never changes the state kind")
+            XCTAssertEqual(store.sulkIdle, idle >= threshold ? idle : 0, "nor the sulk text input")
+        }
+    }
+
+    func testAlwaysFacesBackDoesNotAffectAnEgg() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("poke-sulk-\(UUID().uuidString).json")
+        let line = EvoLine(baseID: 1, tree: EvoNode(speciesID: 1, children: []), rarity: .common, names: [:])
+        let store = CompanionStore(provider: StubProvider(value: line), clock: { sulkNow },
+                                   fileURL: url, rng: SeededRNG(seed: 1))
+        store.alwaysFacesBack = true
+        XCTAssertFalse(store.facesBack)
     }
 
     func testUnknownLastUsageNeverSulks() async {
@@ -105,6 +127,7 @@ final class SulkStateTests: XCTestCase {
                                          sulkIdle: hours * 3600)
         }
         XCTAssertEqual(tooltip(0), l.floatingPetHoverTokensOnly("0"))
+        XCTAssertTrue(tooltip(3).hasSuffix(l.floatingPetHoverSulkHours(3)))
         XCTAssertTrue(tooltip(24).hasSuffix(l.floatingPetHoverSulkHours(24)))
         XCTAssertTrue(tooltip(47.9).hasSuffix(l.floatingPetHoverSulkHours(47)))
         XCTAssertTrue(tooltip(48).hasSuffix(l.floatingPetHoverSulkDays(2)))

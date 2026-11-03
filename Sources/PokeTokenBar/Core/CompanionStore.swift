@@ -11,8 +11,11 @@ final class CompanionStore {
     private(set) var displayState: CompanionStateKind = .egg
     /// Time since the last token usage while `displayState == .sulk`, else 0.
     private(set) var sulkIdle: TimeInterval = 0
-    /// The companion shows its back sprite on every surface.
-    var facesBack: Bool { displayState == .sulk }
+    /// Mirror of `UsageStore.alwaysFacesBack` (set by `AppDelegate.updateCompanion`): a display preference.
+    var alwaysFacesBack = false
+    /// The companion shows its back sprite on every surface: while sulking, or always when asked to.
+    /// An egg has no back to show.
+    var facesBack: Bool { state.active != nil && (alwaysFacesBack || displayState == .sulk) }
     private(set) var currentLine: EvoLine?
     private(set) var representativeSubject = RepresentativeSubject(speciesID: nil, isShiny: false)
     private(set) var isHatching = false

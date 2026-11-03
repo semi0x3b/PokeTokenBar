@@ -221,6 +221,8 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
                 FloatingPetView(animated: wantAnimated).environment(store).environment(companion)))
             hosting.onOpenPopover = onOpenPopover
             hosting.onHide = onHide
+            hosting.onToggleBackView = { [weak self] in self?.store.alwaysFacesBack.toggle() }
+            hosting.isBackViewOn = { [weak self] in self?.store.alwaysFacesBack ?? false }
             hosting.languageProvider = { [weak self] in self?.companion.language ?? .systemDefault }
             hosting.onHoverChange = { [weak self] hovering in
                 if hovering { self?.showHoverCallout() } else { self?.hideHoverCallout() }
@@ -369,6 +371,8 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 final class PetHostingView: NSHostingView<AnyView> {
     var onOpenPopover: (() -> Void)?
     var onHide: (() -> Void)?
+    var onToggleBackView: (() -> Void)?
+    var isBackViewOn: () -> Bool = { false }
     var onHoverChange: ((Bool) -> Void)?
     var languageProvider: () -> AppLanguage = { .systemDefault }
 
@@ -444,11 +448,17 @@ final class PetHostingView: NSHostingView<AnyView> {
                                 action: #selector(handleHide(_:)), keyEquivalent: "")
         hide.target = self
         hide.isEnabled = true
+        let backView = menu.addItem(withTitle: l.backViewLabel,
+                                    action: #selector(handleToggleBackView(_:)), keyEquivalent: "")
+        backView.target = self
+        backView.isEnabled = true
+        backView.state = isBackViewOn() ? .on : .off
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
     @objc func handleOpen(_ sender: Any?) { onOpenPopover?() }
     @objc func handleHide(_ sender: Any?) { onHide?() }
+    @objc func handleToggleBackView(_ sender: Any?) { onToggleBackView?() }
 }
 
 @MainActor

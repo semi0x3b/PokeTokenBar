@@ -161,6 +161,10 @@ final class UsageStore {
     var floatingPetEnabled: Bool {
         didSet { defaults.set(floatingPetEnabled, forKey: "floatingPetEnabled") }
     }
+    /// Always show the companion's back sprite, regardless of usage. A display preference only. Default off.
+    var alwaysFacesBack: Bool {
+        didSet { defaults.set(alwaysFacesBack, forKey: "alwaysFacesBack") }
+    }
     /// 플로팅 펫 스프라이트 한 변 크기(pt).
     var floatingPetSize: Double {
         didSet { defaults.set(floatingPetSize, forKey: "floatingPetSize") }
@@ -812,6 +816,7 @@ final class UsageStore {
         updateNotificationsEnabled = d.object(forKey: "updateNotificationsEnabled") as? Bool ?? true
         statusChecksEnabled = d.object(forKey: "statusChecksEnabled") as? Bool ?? true
         floatingPetEnabled = d.object(forKey: "floatingPetEnabled") as? Bool ?? false
+        alwaysFacesBack = d.object(forKey: "alwaysFacesBack") as? Bool ?? false
         floatingPetSize = d.object(forKey: "floatingPetSize") as? Double ?? 96
         floatingPetBubbleAlerts = d.object(forKey: "floatingPetBubbleAlerts") as? Bool ?? true
         // 기본 powerSaver — 이 설정이 생기기 전의 고정 캡(0.4s)과 같은 프레임 레이트라, 기존
