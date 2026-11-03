@@ -108,7 +108,7 @@ final class LocalizationInterpolationTests: XCTestCase {
             // System notifications / 시스템 알림
             expect(lang, "notifHatchBody", l.notifHatchBody(a), a)
             expect(lang, "notifShinyHatchBody", l.notifShinyHatchBody(a, odds: 4242), a, "4242")
-            expect(lang, "notifEvolveBody", l.notifEvolveBody(a), a)
+            expect(lang, "notifEvolveBody", l.notifEvolveBody(from: a, to: b), a, b)
             expect(lang, "notifDittoRevealBody", l.notifDittoRevealBody(a), a)
             expect(lang, "notifShinyDittoRevealBody", l.notifShinyDittoRevealBody(a), a)
             expect(lang, "notifGraduateBody", l.notifGraduateBody(a), a)

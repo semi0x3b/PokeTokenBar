@@ -961,6 +961,8 @@ final class CompanionStore {
                 } else if detailProvider != nil {
                     Task { await self.loadPokemonDetails(speciesID: next.speciesID) }
                 }
+                let oldName = formDisplayName(line.localizedName(a.currentID, state.language),
+                                              speciesID: a.currentID, form: a.form)
                 let newName = formDisplayName(line.localizedName(next.speciesID, state.language),
                                               speciesID: next.speciesID, form: a.form)
                 justEvolvedTo = newName
@@ -968,7 +970,7 @@ final class CompanionStore {
                 // 짧은 levelUp 창 — 진화 순간 "…(으)로 진화했어요" 문구 노출(hatch/graduate 와 동일 패턴).
                 // 이게 없으면 computeState 가 .levelUp 을 안 내 statusEvolved 가 도달 불가(dead code)였다.
                 eventUntil = clock().addingTimeInterval(4)
-                notifyCompanionEvent(l.notifEvolveTitle, l.notifEvolveBody(newName))
+                notifyCompanionEvent(l.notifEvolveTitle, l.notifEvolveBody(from: oldName, to: newName))
             }
         }
         reconcileActiveProfileGrowth()
@@ -1436,7 +1438,7 @@ final class CompanionStore {
             state.inventory[ItemKind.rareCandy.rawValue, default: 0] += g.count
             // 지급 자체는 알림 여부와 무관(상태 변경). 알림은 "왜 받는지"(그 창 한도를 다 채운 수고) 명시.
             notifyCompanionEvent(l.notifCandyTitle(item: l.itemName(.rareCandy), count: g.count),
-                                 l.notifCandyBody(window: g.windowName))
+                                 l.notifCandyBody(window: g.windowName), showsOnPet: false)
         }
         // 지급이 없어도 재무장(util dip / epoch 교체)은 영속해야 한다 —
         // 안 하면 재시작 시 stale tier=1 로 다음 100% 도달이 "이미 지급"으로 오판돼 지급 누락(회귀).
@@ -1449,7 +1451,13 @@ final class CompanionStore {
 
     /// companion 이벤트 시스템 알림(.app + 토글 ON 일 때만). 한도 알림과 독립.
     private var notifSeq = 0
-    private func notifyCompanionEvent(_ title: String, _ body: String) {
+    /// The newest hatch / evolution / graduation / Ditto line, for the floating pet's hover text. Recorded before the
+    /// bundled-app guard below so a dev build (no system notifications) shows it too.
+    struct CompanionEvent: Equatable { let text: String; let at: Date }
+    private(set) var latestEvent: CompanionEvent?
+
+    private func notifyCompanionEvent(_ title: String, _ body: String, showsOnPet: Bool = true) {
+        if showsOnPet { latestEvent = CompanionEvent(text: body, at: clock()) }
         guard AppEnv.isBundledApp else { return }
         guard UserDefaults.standard.object(forKey: "companionNotifications") as? Bool ?? true else { return }
         notifSeq += 1

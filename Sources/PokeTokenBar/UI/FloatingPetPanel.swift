@@ -108,6 +108,16 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     /// i.e. at the cumulative counts 30, 60, 100, 150 (step * k(k+1)/2 without its first term, 10), so the egg's
     /// progress moves without a request per click.
     static let prayerRefreshStep = 10
+    /// How long the latest hatch / evolution line stays in the hover text.
+    static let eventLineLifetime: TimeInterval = 3600
+
+    /// The event text while it is recent; nil once it is `eventLineLifetime` old. A newer event replaces the older one
+    /// in the store, so there is only ever one candidate.
+    static func eventLine(for event: CompanionStore.CompanionEvent?, now: Date) -> String? {
+        guard let event, now.timeIntervalSince(event.at) < eventLineLifetime else { return nil }
+        return event.text
+    }
+
     /// Minimum gap between prayer-triggered refreshes. A refresh also queries the limit endpoints
     /// (Claude, Codex, Cursor, Antigravity), which have their own rate limits.
     static let prayerRefreshInterval: TimeInterval = 30
@@ -190,6 +200,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             _ = companion.language
             _ = companion.sulkIdle   // hover tooltip suffix
             _ = companion.state.eggPrayers   // hover text shows the prayer count
+            _ = companion.latestEvent        // hover text shows the latest hatch / evolution line
             _ = companion.representativeSubject
         } onChange: { [weak self] in
             Task { @MainActor in
@@ -361,6 +372,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             mode: store.limitDisplayMode,
             l: L(companion.language),
             sulkIdle: companion.sulkIdle,
+            eventLine: Self.eventLine(for: companion.latestEvent, now: clock()),
             prayers: companion.representativeSubject.speciesID == nil ? companion.state.eggPrayers?.count ?? 0 : 0)
     }
 
@@ -699,7 +711,7 @@ struct FloatingPetView: View {
     /// `sulkIdle` > 0 appends how long the companion has been sulking: hours below 48 h, days from there.
     static func hoverTooltip(todayTokens: Int, limitUtilization: Double?,
                              mode: UsageStore.LimitDisplayMode, l: L, sulkIdle: TimeInterval = 0,
-                             prayers: Int = 0) -> String {
+                             eventLine: String? = nil, prayers: Int = 0) -> String {
         let usage = TokenFormatter.grouped(todayTokens)
         var base = l.floatingPetHoverTokensOnly(usage)
         if let pct = limitUtilization {
@@ -710,6 +722,7 @@ struct FloatingPetView: View {
             let hours = Int(sulkIdle / 3600)
             base += " · " + (hours < 48 ? l.floatingPetHoverSulkHours(hours) : l.floatingPetHoverSulkDays(hours / 24))
         }
+        if let eventLine { base += "\n" + eventLine }
         return prayers > 0 ? base + "\n" + l.prayerHoverLine(prayers) : base
     }
 }
