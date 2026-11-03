@@ -373,6 +373,9 @@ struct L {
     var floatingPetMenuHide: String {
         t("플로팅 펫 끄기", "Turn off floating pet", "フローティングペットをオフ", "Desactivar mascota flotante", "Désactiver le compagnon flottant", "Desativar mascote flutuante", "Schwebendes Pokémon ausschalten", "Выключить питомца на экране")
     }
+    var floatingPetHeartsLabel: String {
+        t("펫이 기분 좋아해요", "Your pet is happy", "ペットが喜んでいます", "Tu mascota está feliz", "Votre compagnon est content", "Seu mascote está feliz", "Dein Pokémon freut sich", "Питомцу приятно")
+    }
     func floatingPetHoverTokensOnly(_ tokens: String) -> String {
         t("오늘 \(tokens) 토큰", "Today: \(tokens) tokens", "今日: \(tokens) トークン", "Hoy: \(tokens) tokens", "Aujourd'hui : \(tokens) tokens", "Hoje: \(tokens) tokens", "Heute: \(tokens) Tokens", "Токенов сегодня: \(tokens)")
     }

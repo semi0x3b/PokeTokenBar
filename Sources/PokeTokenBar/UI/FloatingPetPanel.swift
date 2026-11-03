@@ -16,6 +16,10 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private var displayAwake = true
     private var builtAnimated: Bool?
     private var powerObserver: NSObjectProtocol?
+    /// 0 = no hearts; 1...`maxHeartLevel` = hearts currently shown after a stroke.
+    private var heartLevel = 0
+    private var heartExpiry: Task<Void, Never>?
+    private var isHovering = false
 
     private static let originXKey = "floatingPetOriginX"
     private static let originYKey = "floatingPetOriginY"
@@ -35,6 +39,20 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     /// `SpeechBubbleView` body `.lineLimit`. Measure and view must share this — a
     /// headroom-only guard stays green for 3-line copy that still fits 70pt (#167).
     static let bubbleBodyLineLimit = 2
+
+    static let maxHeartLevel = 3
+    /// How long the hearts stay after the last qualifying stroke.
+    static let heartDuration: Duration = .milliseconds(1800)
+
+    /// Next heart level after a qualifying stroke. A limit alert always wins: no hearts over it.
+    static func heartLevel(after current: Int, alertActive: Bool) -> Int {
+        alertActive ? 0 : min(current + 1, maxHeartLevel)
+    }
+
+    /// The panel needs bubble headroom for a limit alert or for hearts.
+    static func isShowingBubble(alertActive: Bool, heartLevel: Int) -> Bool {
+        alertActive || heartLevel > 0
+    }
 
     /// Chrome size plus the signals the view actually fails on: wrap count vs
     /// `bubbleBodyLineLimit`, and single-line width vs the content column.
@@ -211,33 +229,59 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         show()
     }
 
+    private var showingBubble: Bool {
+        Self.isShowingBubble(alertActive: store.currentBubbleAlert != nil, heartLevel: heartLevel)
+    }
+
     private func show() {
         let p = panel ?? makePanel()
         panel = p
         let wantAnimated = Self.shouldAnimate(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if p.contentView == nil || builtAnimated != wantAnimated {
-            let hosting = PetHostingView(rootView: AnyView(
-                FloatingPetView(animated: wantAnimated).environment(store).environment(companion)))
+            let hosting = PetHostingView(rootView: AnyView(EmptyView()))
             hosting.onOpenPopover = onOpenPopover
             hosting.onHide = onHide
             hosting.languageProvider = { [weak self] in self?.companion.language ?? .systemDefault }
             hosting.onHoverChange = { [weak self] hovering in
+                self?.isHovering = hovering
                 if hovering { self?.showHoverCallout() } else { self?.hideHoverCallout() }
             }
+            hosting.onStroke = { [weak self] in self?.petWasStroked() }
             p.contentView = hosting
             builtAnimated = wantAnimated
         }
         if let hosting = p.contentView as? PetHostingView {
             hosting.toolTip = currentHoverText()
+            hosting.strokeDistance = max(10, CGFloat(store.floatingPetSize) * 0.15)
+            hosting.rootView = AnyView(
+                FloatingPetView(animated: wantAnimated, heartLevel: heartLevel)
+                    .environment(store).environment(companion))
         }
         let petSize = CGFloat(store.floatingPetSize)
-        p.setFrame(targetFrame(petSize: petSize, showingBubble: store.currentBubbleAlert != nil),
-                   display: true)
+        p.setFrame(targetFrame(petSize: petSize, showingBubble: showingBubble), display: true)
         p.orderFrontRegardless()
         if hoverPanel?.isVisible == true { showHoverCallout() }
     }
 
+    private func petWasStroked() {
+        heartLevel = Self.heartLevel(after: heartLevel, alertActive: store.currentBubbleAlert != nil)
+        guard heartLevel > 0 else { return }
+        hideHoverCallout()
+        sync()
+        // One-shot expiry, restarted by every stroke; no standing timer.
+        heartExpiry?.cancel()
+        heartExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.heartDuration)
+            guard !Task.isCancelled, let self else { return }
+            self.heartLevel = 0
+            self.sync()
+            if self.isHovering { self.showHoverCallout() }
+        }
+    }
+
     private func hide() {
+        heartExpiry?.cancel()
+        heartLevel = 0
         hideHoverCallout()
         guard let p = panel else { return }
         p.orderOut(nil)
@@ -256,7 +300,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private func showHoverCallout() {
         guard let pet = panel, pet.isVisible else { return }
         // Don't cover an active limit bubble — the speech bubble is the priority surface.
-        if store.currentBubbleAlert != nil { hideHoverCallout(); return }
+        if showingBubble { hideHoverCallout(); return }
         let text = currentHoverText()
         let appearance = NSApp.effectiveAppearance
         let colors = Self.hoverCalloutColors(for: appearance)
@@ -356,7 +400,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard let p = panel, p.isVisible else { return }
         let petSize = CGFloat(store.floatingPetSize)
-        let size = Self.panelSize(petSize: petSize, showingBubble: store.currentBubbleAlert != nil)
+        let size = Self.panelSize(petSize: petSize, showingBubble: showingBubble)
         let pet = Self.petOrigin(panelOrigin: p.frame.origin, petSize: petSize, panelSize: size)
         defaults.set(Double(pet.x), forKey: Self.originXKey)
         defaults.set(Double(pet.y), forKey: Self.originYKey)
@@ -368,8 +412,12 @@ final class PetHostingView: NSHostingView<AnyView> {
     var onOpenPopover: (() -> Void)?
     var onHide: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
+    var onStroke: (() -> Void)?
     var languageProvider: () -> AppLanguage = { .systemDefault }
+    /// Minimum horizontal travel (pt) for one stroke; scales with the pet size.
+    var strokeDistance: CGFloat = 14
 
+    private var petting = PettingDetector()
     private var mouseDownScreen: NSPoint?
     private var originAtDown: NSPoint?
     private var didDrag = false
@@ -386,15 +434,25 @@ final class PetHostingView: NSHostingView<AnyView> {
         for area in trackingAreas { removeTrackingArea(area) }
         addTrackingArea(NSTrackingArea(
             rect: bounds,
-            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
             owner: self,
             userInfo: nil))
     }
 
     override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
-    override func mouseExited(with event: NSEvent) { onHoverChange?(false) }
+    override func mouseExited(with event: NSEvent) {
+        petting.reset()
+        onHoverChange?(false)
+    }
+
+    /// Tracking-area `mouseMoved` only arrives with no button pressed, so drags never count as strokes.
+    override func mouseMoved(with event: NSEvent) {
+        let x = convert(event.locationInWindow, from: nil).x
+        if petting.feed(x: x, at: event.timestamp, minStroke: strokeDistance) { onStroke?() }
+    }
 
     override func mouseDown(with event: NSEvent) {
+        petting.reset()
         if event.modifierFlags.contains(.control) {
             showContextMenu(event)
             return
@@ -405,6 +463,7 @@ final class PetHostingView: NSHostingView<AnyView> {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        petting.reset()
         guard let window, let start = mouseDownScreen, let origin = originAtDown else { return }
         let now = NSEvent.mouseLocation
         if !Self.isClick(from: start, to: now) { didDrag = true }
@@ -452,6 +511,8 @@ final class PetHostingView: NSHostingView<AnyView> {
 @MainActor
 struct FloatingPetView: View {
     var animated: Bool = true
+    /// Hearts shown above the pet after a stroke (0 = none). A limit alert takes precedence.
+    var heartLevel: Int = 0
     @Environment(UsageStore.self) private var store
     @Environment(CompanionStore.self) private var companion
 
@@ -461,6 +522,10 @@ struct FloatingPetView: View {
         VStack(spacing: 8) {
             if let alert = store.currentBubbleAlert {
                 SpeechBubbleView(alert: alert, l: L(companion.language))
+                    .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
+                    .zIndex(1)
+            } else if heartLevel > 0 {
+                HeartBubbleView(count: heartLevel, l: L(companion.language))
                     .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
                     .zIndex(1)
             }
@@ -474,6 +539,8 @@ struct FloatingPetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .animation(animated ? .spring(response: 0.3, dampingFraction: 0.7) : nil,
                    value: store.currentBubbleAlert)
+        .animation(animated ? .spring(response: 0.3, dampingFraction: 0.7) : nil,
+                   value: heartLevel)
     }
 
     static func hoverTooltip(todayTokens: Int, limitUtilization: Double?,
@@ -484,6 +551,85 @@ struct FloatingPetView: View {
             return l.floatingPetHoverWithLimit(usage, mode == .remaining ? l.percentRemaining(text) : text)
         }
         return l.floatingPetHoverTokensOnly(usage)
+    }
+}
+
+/// Detects a back-and-forth stroking motion from horizontal mouse samples. Pure, so it is
+/// unit-testable without AppKit events (same style as `FloatingPetController.isClick`).
+struct PettingDetector {
+    /// Direction reversals needed within `window` to count as stroking.
+    static let requiredReversals = 3
+    static let window: TimeInterval = 1.2
+
+    private var direction: CGFloat = 0      // 0 = not moving far enough yet, else -1 / +1
+    private var extremeX: CGFloat = 0       // furthest x reached in the current direction
+    private var lastTimestamp: TimeInterval?
+    private var reversalTimes: [TimeInterval] = []
+
+    mutating func reset() { self = PettingDetector() }
+
+    /// Feed one mouse sample. Returns true when this sample completes a reversal and the
+    /// recent wiggle has at least `requiredReversals` of them. Every stroke must travel
+    /// `minStroke` points, so jitter and slow drifting never reverse.
+    mutating func feed(x: CGFloat, at time: TimeInterval, minStroke: CGFloat) -> Bool {
+        guard let last = lastTimestamp, time - last <= Self.window else {
+            reset()
+            lastTimestamp = time
+            extremeX = x
+            return false
+        }
+        lastTimestamp = time
+        reversalTimes.removeAll { time - $0 > Self.window }
+
+        if direction == 0 {
+            guard abs(x - extremeX) >= minStroke else { return false }
+            direction = x > extremeX ? 1 : -1
+            extremeX = x
+            return false
+        }
+        if (x - extremeX) * direction > 0 {     // still travelling the same way
+            extremeX = x
+            return false
+        }
+        guard (extremeX - x) * direction >= minStroke else { return false }
+        direction = -direction
+        extremeX = x
+        reversalTimes.append(time)
+        return reversalTimes.count >= Self.requiredReversals
+    }
+}
+
+/// Transient hearts shown after stroking the pet. Same chrome as `SpeechBubbleView`.
+@MainActor
+private struct HeartBubbleView: View {
+    let count: Int
+    let l: L
+
+    var body: some View {
+        Text(verbatim: String(repeating: "♥", count: count))
+            .font(.system(size: 14, weight: .bold))
+            .foregroundColor(.pink)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+            )
+            .overlay(
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: 0))
+                    path.addLine(to: CGPoint(x: 10, y: 0))
+                    path.addLine(to: CGPoint(x: 5, y: 6))
+                    path.closeSubpath()
+                }
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .frame(width: 10, height: 6)    // fixed frame so the tail sits at the bubble's center
+                .offset(y: 5),
+                alignment: .bottom
+            )
+            .padding(.bottom, 6)
+            .accessibilityLabel(l.floatingPetHeartsLabel)
     }
 }
 
