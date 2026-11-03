@@ -891,7 +891,7 @@ final class PetHeartState {
 
 /// Pixel-art layout of the heart bubble, so it matches the Gen-V pixel sprites.
 /// One character per pixel: `.` empty, `O` outline, `W` fill, `R` heart, `D` heart shade, `H` heart highlight.
-/// A 2-step rounded bubble with its tail toward the lower left.
+/// A 2-step rounded bubble with its tail at the bottom center.
 enum HeartBubbleArt {
     /// Pixel unit in points; an integer so edges stay crisp on 1x and 2x displays.
     static let pixel: CGFloat = 2
@@ -909,9 +909,9 @@ enum HeartBubbleArt {
         "OWWWWWWWDWWWWWWWO",
         "OWWWWWWWWWWWWWWWO",
         ".OWWWWWWWWWWWWWO.",
-        "..OWWOOOOOOOOOO..",
-        "..OWO............",
-        "..OO.............",
+        "..OOOOOWWWOOOOO..",
+        ".......OWO.......",
+        "........O........",
     ]
 
     static var height: CGFloat { CGFloat(rows.count) * pixel }
