@@ -646,16 +646,12 @@ struct FloatingPetView: View {
                 SpeechBubbleView(alert: alert, l: L(companion.language))
                     .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
                     .zIndex(1)
-            } else if hearts.isShowing {
-                HeartBubbleView(l: L(companion.language))
-                    .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
-                    .zIndex(1)
             }
 
             SpriteView(speciesID: subject.speciesID, size: size, animated: animated,
                        shiny: subject.isShiny,
                        minFrameDelay: store.animationQuality.frameFloor, spriteStore: spriteStore, form: subject.form,
-                       back: companion.facesBack, eggCrackStage: companion.eggCrackStage)
+                       back: companion.facesBack, eggCrackStage: companion.eggCrackStage, reportsVisibleTop: true)
                 .onChange(of: companion.eggCrackStage) { old, new in
                     if new > old { burst.wobble() }
                 }
@@ -672,6 +668,22 @@ struct FloatingPetView: View {
                 }
                 .frame(width: size, height: size)
                 .overlay { PrayerEmojiLayer(burst: burst, size: size, animated: animated) }
+                // Hearts hug the visible top of the sprite (not its box). Insertion pops in; removal is
+                // instant, because the panel shrinks at the same moment and a fading bubble would be
+                // drawn lower, over the pet.
+                .overlayPreferenceValue(SpriteVisibleTopKey.self, alignment: .top) { visibleTop in
+                    if hearts.isShowing, store.currentBubbleAlert == nil {
+                        HeartBubbleView(l: L(companion.language))
+                            .offset(y: SpriteVisibleTop.bubbleTopOffset(
+                                visibleTop: visibleTop ?? 0,
+                                bubbleHeight: HeartBubbleArt.height,
+                                overlap: HeartBubbleArt.tailOverlap))
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.8, anchor: .bottom).combined(with: .opacity),
+                                removal: .identity))
+                            .allowsHitTesting(false)
+                    }
+                }
                 .zIndex(0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -902,6 +914,10 @@ enum HeartBubbleArt {
         "..OO.............",
     ]
 
+    static var height: CGFloat { CGFloat(rows.count) * pixel }
+    /// How far the tail tip sticks into the sprite's visible top (pt).
+    static let tailOverlap: CGFloat = 3
+
     static func color(for cell: Character) -> Color? {
         switch cell {
         case "O": Color(red: 0x20 / 255, green: 0x20 / 255, blue: 0x20 / 255)
@@ -933,8 +949,7 @@ struct HeartBubbleView: View {
                 }
             }
         }
-        .frame(width: CGFloat(rows[0].count) * pixel, height: CGFloat(rows.count) * pixel)
-        .padding(.bottom, 6)
+        .frame(width: CGFloat(rows[0].count) * pixel, height: HeartBubbleArt.height)
         .accessibilityLabel(l.floatingPetHeartsLabel)
     }
 }

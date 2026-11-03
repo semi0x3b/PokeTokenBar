@@ -128,9 +128,57 @@ final class StrokeHeartBubbleTests: XCTestCase {
     func testHeartBubbleFitsThePanelAndHeadroom() {
         let rows = HeartBubbleArt.rows
         XCTAssertLessThanOrEqual(CGFloat(rows[0].count) * HeartBubbleArt.pixel, FloatingPetController.bubbleMinWidth)
-        // bubble + 6pt bottom padding + 8pt VStack spacing
-        XCTAssertLessThanOrEqual(CGFloat(rows.count) * HeartBubbleArt.pixel + 6 + 8,
+        // Worst case: the sprite touches its box top (visible top 0), so the bubble sits highest.
+        XCTAssertLessThanOrEqual(HeartBubbleArt.height - HeartBubbleArt.tailOverlap,
                                  FloatingPetController.bubbleHeadroom)
+        let top = SpriteVisibleTop.bubbleTopOffset(visibleTop: 0, bubbleHeight: HeartBubbleArt.height,
+                                                   overlap: HeartBubbleArt.tailOverlap)
+        XCTAssertGreaterThanOrEqual(top, -FloatingPetController.bubbleHeadroom, "never clipped by the panel top")
+    }
+
+    // MARK: anchoring to the visible sprite
+
+    func testTallSpriteTopIsNearTheBoxTop() {
+        // 36×66 canvas (Jackie-like) fills the 96pt box height; sprite starts 5% below the canvas top.
+        let inset = SpriteVisibleTop.inset(box: 96, imageSize: CGSize(width: 36, height: 66),
+                                           opaqueTopFraction: 0.05)
+        XCTAssertEqual(inset, 4.8, accuracy: 0.001)
+    }
+
+    func testWideShortSpriteTopSitsBelowTheBoxTop() {
+        // 60×30 canvas fits 96×48: 24pt of empty box above, then 10% of the canvas is transparent.
+        let inset = SpriteVisibleTop.inset(box: 96, imageSize: CGSize(width: 60, height: 30),
+                                           opaqueTopFraction: 0.1)
+        XCTAssertEqual(inset, 24 + 4.8, accuracy: 0.001)
+    }
+
+    func testEggTopUsesItsOwnOpaqueBounds() {
+        // Cropped 30×30 egg: square, so no letterboxing; the top 3 rows are empty.
+        let inset = SpriteVisibleTop.inset(box: 96, imageSize: CGSize(width: 30, height: 30),
+                                           opaqueTopFraction: 0.1)
+        XCTAssertEqual(inset, 9.6, accuracy: 0.001)
+    }
+
+    func testBubbleTailLandsJustInsideTheVisibleTop() {
+        let height = HeartBubbleArt.height
+        let top = SpriteVisibleTop.bubbleTopOffset(visibleTop: 24, bubbleHeight: height, overlap: 3)
+        XCTAssertEqual(top + height, 24 + 3, accuracy: 0.001, "tail tip 3pt below the visible top")
+    }
+
+    func testOpaqueTopFractionScansTheFirstVisibleRow() throws {
+        let side = 10
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0))
+        let data = try XCTUnwrap(rep.bitmapData)
+        for i in 0..<(rep.bytesPerRow * side) { data[i] = 0 }
+        // One opaque pixel on row 3 (row 0 is the top of the bitmap).
+        let index = 3 * rep.bytesPerRow + 4 * 4
+        data[index] = 255; data[index + 1] = 0; data[index + 2] = 0; data[index + 3] = 255
+        let image = NSImage(size: NSSize(width: side, height: side))
+        image.addRepresentation(rep)
+        XCTAssertEqual(SpriteVisibleTop.opaqueTopFraction(of: image), 0.3, accuracy: 0.001)
     }
 
     func testEveryArtCellHasAColorOrIsTransparent() {
@@ -164,11 +212,17 @@ final class FloatingPetPettingRenderingTests: XCTestCase {
                 ("bubble", AnyView(HeartBubbleView(l: l))),
                 ("before", AnyView(SpriteView(speciesID: nil, size: petSize, animated: false, shiny: false)
                     .frame(width: petSize, height: petSize))),
-                ("after", AnyView(VStack(spacing: 8) {
-                    HeartBubbleView(l: l)
-                    SpriteView(speciesID: nil, size: petSize, animated: false, shiny: false)
+                ("after", AnyView(
+                    SpriteView(speciesID: nil, size: petSize, animated: false, shiny: false,
+                               reportsVisibleTop: true)
                         .frame(width: petSize, height: petSize)
-                })),
+                        .overlayPreferenceValue(SpriteVisibleTopKey.self, alignment: .top) { visibleTop in
+                            HeartBubbleView(l: l)
+                                .offset(y: SpriteVisibleTop.bubbleTopOffset(
+                                    visibleTop: visibleTop ?? 0, bubbleHeight: HeartBubbleArt.height,
+                                    overlap: HeartBubbleArt.tailOverlap))
+                        }
+                        .padding(.top, HeartBubbleArt.height))),
             ]
             for (label, content) in variants {
                 let renderer = ImageRenderer(content: content
