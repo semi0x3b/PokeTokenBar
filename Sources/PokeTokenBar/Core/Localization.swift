@@ -1224,6 +1224,26 @@ struct L {
     var notifShinyHatchTitle: String { t("✨ 이로치 포켓몬!", "✨ Shiny Pokémon!", "✨ 色違いポケモン！", "✨ ¡Pokémon variocolor!", "✨ Pokémon chromatique !", "✨ Pokémon shiny!", "✨ Schillerndes Pokémon!", "✨ Шайни-покемон!") }
     /// 실제 판정에 쓴 분모를 받는다 — 부적이 있으면 64 가 아니다.
     func notifShinyHatchBody(_ name: String, odds: UInt64) -> String { t("이로치 \(KoreanParticle.subject.attach(to: name)) 태어났어요! (1/\(odds))", "A shiny \(name) hatched! (1 in \(odds))", "色違いの \(name) が生まれました！(1/\(odds))", "¡Nació un \(name) variocolor! (1 entre \(odds))", "Un \(name) chromatique est né ! (1 sur \(odds))", "Nasceu um \(name) shiny! (1 em \(odds))", "Ein schillerndes \(name) ist geschlüpft! (1/\(odds))", "Вылупился шайни \(name)! (шанс 1 к \(odds))") }
+    // MARK: 기도하기 (알 위약 버튼)
+    var prayButton: String { t("기도하기", "Pray", "お祈りする", "Rezar", "Prier", "Rezar", "Beten", "Молиться") }
+    func prayerCount(_ n: Int) -> String { t("기도 \(n)회", "Prayers: \(n)", "お祈り \(n)回", "Oraciones: \(n)", "Prières : \(n)", "Orações: \(n)", "Gebete: \(n)", "Молитв: \(n)") }
+    func prayerBornWith(_ n: Int) -> String { t("기도 \(n)회로 태어남", "Born after \(n) prayers", "お祈り\(n)回で誕生", "Nació tras \(n) oraciones", "Né après \(n) prières", "Nasceu após \(n) orações", "Geboren nach \(n) Gebeten", "Родился после \(n) молитв") }
+    /// `purchased` = the egg came from `buyEgg`; otherwise it arrived on its own.
+    func prayerFutileNote(purchased: Bool) -> String {
+        purchased
+            ? t("참고: 이 아이는 알을 산 순간 정해져 있었어요.", "Note: this one was already decided the moment you bought the egg.", "補足：この子はタマゴを買った時点で決まっていました。", "Nota: este ya estaba decidido en cuanto compraste el huevo.", "Remarque : celui-ci était déjà décidé dès l'achat de l'œuf.", "Nota: este já estava decidido no momento em que você comprou o ovo.", "Hinweis: Dieses Pokémon stand schon beim Kauf des Eis fest.", "Примечание: этот покемон был предопределён в момент покупки яйца.")
+            : t("참고: 이 아이는 알이 온 순간 정해져 있었어요.", "Note: this one was already decided the moment the egg arrived.", "補足：この子はタマゴが来た時点で決まっていました。", "Nota: este ya estaba decidido en cuanto llegó el huevo.", "Remarque : celui-ci était déjà décidé dès l'arrivée de l'œuf.", "Nota: este já estava decidido no momento em que o ovo chegou.", "Hinweis: Dieses Pokémon stand schon beim Eintreffen des Eis fest.", "Примечание: этот покемон был предопределён в момент появления яйца.")
+    }
+    /// Hatch notification body once the egg was prayed over. `legendary` = the top rarity tier ("it worked?!").
+    func notifPrayerHatchBody(_ name: String, prayers: Int, shiny: Bool, legendary: Bool) -> String {
+        let lead = legendary
+            ? t("기도 \(prayers)번… 통했다?! ", "\(prayers) prayers… it worked?! ", "お祈り\(prayers)回… 通じた？！ ", "\(prayers) oraciones… ¿funcionó?! ", "\(prayers) prières… ça a marché ?! ", "\(prayers) orações… funcionou?! ", "\(prayers) Gebete… hat es gewirkt?! ", "\(prayers) молитв… сработало?! ")
+            : t("기도 \(prayers)번 끝에 ", "After \(prayers) prayers: ", "お祈り\(prayers)回の末、", "Tras \(prayers) oraciones: ", "Après \(prayers) prières : ", "Após \(prayers) orações: ", "Nach \(prayers) Gebeten: ", "После \(prayers) молитв: ")
+        let outcome = shiny
+            ? t("이로치 \(KoreanParticle.subject.attach(to: name)) 나왔어요!", "A shiny \(name) hatched!", "色違いの \(name) が生まれました！", "¡Nació un \(name) variocolor!", "Un \(name) chromatique est né !", "Nasceu um \(name) shiny!", "Ein schillerndes \(name) ist geschlüpft!", "Вылупился шайни \(name)!")
+            : t("\(KoreanParticle.subject.attach(to: name)) 나왔어요!", "\(name) hatched!", "\(name) が生まれました！", "¡Salió \(name)!", "\(name) est sorti !", "Saiu \(name)!", "\(name) ist geschlüpft!", "Вылупился \(name)!")
+        return lead + outcome
+    }
     var eggImminent: String { t("곧 부화해요!", "About to hatch!", "もうすぐ孵化！", "¡Está a punto de eclosionar!", "Sur le point d'éclore !", "Está quase chocando!", "Schlüpft gleich!", "Вот-вот вылупится!") }
     /// 첫 실행(아직 토큰 적립 0) 안내 — "왜 아무 일도 안 일어나지"를 방지.
     /// `amount` 는 성장 난이도가 반영된 부화 임계(포맷된 값) — 고정 5M 이 아니다.
