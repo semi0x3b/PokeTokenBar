@@ -7,6 +7,20 @@ private struct EventLineProvider: PokeProviding {
     func baseSpeciesIndex() async throws -> [BaseSpecies] { [BaseSpecies(id: value.baseID, captureRate: 255)] }
 }
 
+/// Base 1 is a common three-stage line (the disguise); 132 is Ditto.
+private struct DittoEventProvider: PokeProviding {
+    func line(baseSpeciesID: Int) async throws -> EvoLine {
+        if baseSpeciesID == PokemonOdds.dittoSpeciesID {
+            return EvoLine(baseID: 132, tree: EvoNode(speciesID: 132, children: []), rarity: .rare,
+                           names: [132: ["en": "Ditto"]])
+        }
+        return EvoLine(baseID: 1,
+                       tree: EvoNode(speciesID: 1, children: [EvoNode(speciesID: 2, children: [EvoNode(speciesID: 3, children: [])])]),
+                       rarity: .common, names: [1: ["en": "Bulb"], 2: ["en": "Ivy"], 3: ["en": "Venu"]])
+    }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { [BaseSpecies(id: 1, captureRate: 255)] }
+}
+
 /// The floating pet pops its hover callout once with the latest hatch / evolution line.
 @MainActor
 final class PetEventLineTests: XCTestCase {
@@ -92,5 +106,57 @@ final class PetEventLineTests: XCTestCase {
             let text = L(language).notifEvolveBody(from: "AAA", to: "BBB")
             XCTAssertTrue(text.contains("AAA") && text.contains("BBB"), "\(language) drops a name")
         }
+    }
+
+    // MARK: a disguised Ditto must not be spoiled by the event line
+
+    /// A seed whose hatch rolls (shiny, nature, Ditto disguise) end in a shiny, disguised Ditto.
+    private func shinyDisguisingSeed() throws -> UInt64 {
+        for candidate: UInt64 in 0..<2_000_000 {
+            var rng = SeededRNG(seed: candidate)
+            let shinyRoll = rng.next(); _ = rng.next(); let dittoRoll = rng.next()
+            if shinyRoll % PokemonOdds.shinyDenominator == 0 && dittoRoll % PokemonOdds.dittoDisguiseDenominator == 0 {
+                return candidate
+            }
+        }
+        throw XCTSkip("no seed found")
+    }
+
+    private func dittoStore(seed: UInt64) -> CompanionStore {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("event-ditto-\(UUID()).json")
+        let store = CompanionStore(provider: DittoEventProvider(), clock: { self.now }, fileURL: url,
+                                   rng: SeededRNG(seed: seed), dittoDisguiseRollingEnabled: true)
+        store.setLanguage(.en)
+        return store
+    }
+
+    func testDisguisedDittoHatchEventShowsTheDisguiseAndHidesShiny() async throws {
+        let seed = try shinyDisguisingSeed()
+
+        let plain = dittoStore(seed: seed)
+        await plain.hatch(baseID: 1)
+        XCTAssertNotNil(plain.state.active?.dittoDisguise)
+        XCTAssertEqual(plain.latestEvent?.text, L(.en).notifHatchBody("Bulb"), "same line as the notification")
+
+        let prayed = dittoStore(seed: seed)
+        prayed.pray(); prayed.pray()
+        await prayed.hatch(baseID: 1)
+        XCTAssertEqual(prayed.latestEvent?.text,
+                       L(.en).notifPrayerHatchBody("Bulb", prayers: 2, shiny: false, rarity: .common))
+        XCTAssertFalse(prayed.latestEvent?.text.contains("Ditto") ?? true)
+        XCTAssertFalse(prayed.latestEvent?.text.lowercased().contains("shiny") ?? true, "a disguised shiny stays hidden")
+    }
+
+    func testRevealEventReplacesTheHatchLineAndNeverShowsAnEvolution() async throws {
+        let store = dittoStore(seed: try shinyDisguisingSeed())
+        await store.hatch(baseID: 1)
+        store.applyUsage(130_000_000)   // past the first evolution threshold: the disguise breaks instead of evolving
+        let deadline = Date().addingTimeInterval(2)
+        while store.state.active?.dittoRevealed != true, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(store.state.active?.dittoRevealed, true)
+        XCTAssertEqual(store.latestEvent?.text, L(.en).notifShinyDittoRevealBody("Bulb"))
+        XCTAssertFalse(store.latestEvent?.text.contains("evolved") ?? true)
     }
 }
