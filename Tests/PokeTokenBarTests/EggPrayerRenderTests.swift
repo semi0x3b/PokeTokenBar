@@ -26,8 +26,7 @@ final class EggPrayerRenderTests: XCTestCase {
         windows = []
     }
 
-    private func store(language: AppLanguage, prayers: PrayerRecord?, egg: Bool,
-                       eggProgress: Double = 0.1) async throws -> CompanionStore {
+    private func store(language: AppLanguage, prayers: PrayerRecord?, egg: Bool) async throws -> CompanionStore {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("prayer-render-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -37,7 +36,7 @@ final class EggPrayerRenderTests: XCTestCase {
         var state = CompanionState()
         state.language = language
         if egg {
-            state.eggUsage = Int(Double(PokemonBalance.eggHatchThreshold) * eggProgress)
+            state.eggUsage = 1_000_000
             state.eggPrayers = prayers
         } else {
             state.dex = [DexEntry(id: "fixture", baseID: 46, finalID: 47, chainOrder: [46, 47], rarity: .common,
@@ -119,29 +118,6 @@ final class EggPrayerRenderTests: XCTestCase {
             try await writePNG(egg, height: 200,
                                to: URL(fileURLWithPath: directory).appendingPathComponent("floating-egg-3-prayer-emojis-\(tag).png"),
                                dark: dark)
-        }
-    }
-
-    /// Egg at 20 / 50 / 80 / 95 % progress: the real home card (76 pt egg) and a floating-size egg, light and dark.
-    func testWriteEggCrackStages() async throws {
-        guard let directory = ProcessInfo.processInfo.environment["PTB_PRAYER_RENDER_DIR"] else {
-            throw XCTSkip("PTB_PRAYER_RENDER_DIR not set")
-        }
-        guard await SpriteLoader.eggImage() != nil else { throw XCTSkip("egg sprite unavailable offline") }
-        let output = URL(fileURLWithPath: directory)
-        for progress in [0.2, 0.5, 0.8, 0.95] {
-            let store = try await store(language: .en, prayers: nil, egg: true, eggProgress: progress)
-            XCTAssertEqual(store.eggCrackStage, EggCracks.stage(forProgress: progress))
-            let floating = SpriteView(speciesID: nil, size: 128, animated: false,
-                                      eggCrackStage: EggCracks.stage(forProgress: progress))
-                .frame(width: 128, height: 128)
-            for (dark, tag) in [(false, "light"), (true, "dark")] {
-                let name = "egg-cracks-\(Int(progress * 100))pct"
-                try await writePNG(CompanionHeader(store: store), height: 230,
-                                   to: output.appendingPathComponent("\(name)-home-card-\(tag).png"), dark: dark)
-                try await writePNG(floating, height: 200,
-                                   to: output.appendingPathComponent("\(name)-floating-\(tag).png"), dark: dark)
-            }
         }
     }
 }

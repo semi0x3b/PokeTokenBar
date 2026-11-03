@@ -643,10 +643,7 @@ struct FloatingPetView: View {
             SpriteView(speciesID: subject.speciesID, size: size, animated: animated,
                        shiny: subject.isShiny,
                        minFrameDelay: store.animationQuality.frameFloor, form: subject.form,
-                       eggCrackStage: companion.eggCrackStage, reportsVisibleTop: true)
-                .onChange(of: companion.eggCrackStage) { old, new in
-                    if new > old { burst.wobble() }
-                }
+                       reportsVisibleTop: true)
                 // One-shot wobble per prayer; keyframes run once per trigger change, never in a loop.
                 .keyframeAnimator(initialValue: 0.0, trigger: burst.wobbleCount) { sprite, angle in
                     sprite.rotationEffect(.degrees(angle))
@@ -715,9 +712,6 @@ final class PrayerBurst {
     private(set) var particles: [Particle] = []
     /// Bumped on every prayer; the egg wobbles once per change.
     private(set) var wobbleCount = 0
-
-    /// Wobble the egg once without a prayer (a new crack appeared).
-    func wobble() { wobbleCount += 1 }
 
     func spawn(xFraction: Double = .random(in: 0...1)) {
         let particle = Particle(xFraction: min(max(xFraction, 0), 1))
