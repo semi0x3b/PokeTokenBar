@@ -9,6 +9,20 @@ private struct PrayerOfflineProvider: PokeProviding {
     func baseSpecies(id: Int) async throws -> BaseSpecies? { nil }
 }
 
+/// Base 1 is a common three-stage line (the disguise); 132 is Ditto.
+private struct DisguiseTestProvider: PokeProviding {
+    func line(baseSpeciesID: Int) async throws -> EvoLine {
+        if baseSpeciesID == PokemonOdds.dittoSpeciesID {
+            return EvoLine(baseID: 132, tree: EvoNode(speciesID: 132, children: []), rarity: .rare,
+                           names: [132: ["en": "Ditto"]])
+        }
+        return EvoLine(baseID: 1,
+                       tree: EvoNode(speciesID: 1, children: [EvoNode(speciesID: 2, children: [EvoNode(speciesID: 3, children: [])])]),
+                       rarity: .common, names: [1: ["en": "Bulb"], 2: ["en": "Ivy"], 3: ["en": "Venu"]])
+    }
+    func baseSpeciesIndex() async throws -> [BaseSpecies] { [BaseSpecies(id: 1, captureRate: 255)] }
+}
+
 @MainActor
 final class EggPrayerTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -203,7 +217,7 @@ final class EggPrayerTests: XCTestCase {
         XCTAssertEqual(en.notifPrayerHatchBody("Mew", prayers: 37, shiny: false, rarity: .legendary),
                        "37 prayers… it worked?! Mew hatched!")
         XCTAssertEqual(ko.notifPrayerHatchBody("피카츄", prayers: 37, shiny: true, rarity: .rare),
-                       "기도 37번에 반짝이까지?! 피카츄가 나왔어요!")
+                       "기도 37번에 이로치까지?! 피카츄가 나왔어요!")
         XCTAssertEqual(en.notifPrayerHatchBody("Pikachu", prayers: 37, shiny: true, rarity: .common),
                        "37 prayers AND it's shiny?! Pikachu hatched!")
         for rarity in [Rarity.uncommon, .rare] {
@@ -266,12 +280,12 @@ final class EggPrayerTests: XCTestCase {
     }
 
     func testFutileNoteDependsOnHowTheEggArrived() {
-        XCTAssertEqual(L(.ko).prayerFutileNote(purchased: true), "참고: 이 아이는 알을 산 순간 정해져 있었어요.")
-        XCTAssertEqual(L(.ko).prayerFutileNote(purchased: false), "참고: 이 아이는 알이 온 순간 정해져 있었어요.")
+        XCTAssertEqual(L(.ko).prayerFutileNote(purchased: true), "참고: 이 아이의 종은 알을 산 순간 정해져 있었어요.")
+        XCTAssertEqual(L(.ko).prayerFutileNote(purchased: false), "참고: 이 아이의 종은 알이 온 순간 정해져 있었어요.")
         XCTAssertEqual(L(.en).prayerFutileNote(purchased: true),
-                       "Fun fact: this one was decided the moment you bought the egg.")
+                       "Fun fact: this one's species was decided the moment you bought the egg.")
         XCTAssertEqual(L(.en).prayerFutileNote(purchased: false),
-                       "Fun fact: this one was decided the moment the egg arrived.")
+                       "Fun fact: this one's species was decided the moment the egg arrived.")
         XCTAssertEqual(L(.ko).prayerBornWith(37), "기도 37번 받고 태어남")
         XCTAssertEqual(L(.en).prayerBornWith(37), "Born after 37 prayers")
     }
@@ -420,6 +434,55 @@ final class EggPrayerTests: XCTestCase {
         XCTAssertTrue(decide(30, last: 0, at: now, later))
         XCTAssertTrue(decide(60, last: 1, at: now, later))
     }
+
+    // MARK: Ditto: the disguise is rolled at hatch, so the species note must not outlive the reveal
+
+    /// A seed whose hatch rolls (shiny, nature, Ditto disguise) end in a disguised Ditto.
+    private func disguisingSeed(shiny: Bool) throws -> UInt64 {
+        for candidate: UInt64 in 0..<2_000_000 {
+            var rng = SeededRNG(seed: candidate)
+            let shinyRoll = rng.next(); _ = rng.next(); let dittoRoll = rng.next()
+            let isShiny = shinyRoll % PokemonOdds.shinyDenominator == 0
+            if dittoRoll % PokemonOdds.dittoDisguiseDenominator == 0 && isShiny == shiny { return candidate }
+        }
+        throw XCTSkip("no seed found")
+    }
+
+    private func prayedDisguisedDitto(shiny: Bool = false) async throws -> CompanionStore {
+        let url = tempURL()
+        let json = "{\"installBaselineSet\":true,\"usedSinceInstall\":2000000000,\"lastDate\":\"d\","
+            + "\"active\":null,\"dex\":[],\"collectedFinals\":[],\"pendingHatchID\":1,\"eggWasPurchased\":true}"
+        try Data(json.utf8).write(to: url)
+        let store = CompanionStore(provider: DisguiseTestProvider(), clock: { self.now }, fileURL: url,
+                                   rng: SeededRNG(seed: try disguisingSeed(shiny: shiny)),
+                                   dittoDisguiseRollingEnabled: true)
+        store.pray(); store.pray()
+        await store.hatch(baseID: 1)
+        XCTAssertNotNil(store.state.active?.dittoDisguise, "the seed must produce a disguised Ditto")
+        return store
+    }
+
+    func testADisguisedDittoKeepsItsPrayersAndTheSpeciesNoteLooksLikeAnyOtherEgg() async throws {
+        let store = try await prayedDisguisedDitto()
+        let record = PrayerRecord(count: 2, wasFutile: true, eggWasPurchased: true)
+        XCTAssertEqual(store.state.active?.prayers, record)
+        XCTAssertEqual(store.dexEntries.first?.prayers, record,
+                       "the detail page reads this entry; the disguise species was fixed at purchase, so the note is true")
+    }
+
+    func testRevealingTheDittoDropsTheSpeciesNoteButKeepsThePrayerCount() async throws {
+        let store = try await prayedDisguisedDitto()
+        store.applyUsage(130_000_000)   // past the first evolution threshold: the disguise breaks
+        let deadline = Date().addingTimeInterval(2)
+        while store.state.active?.dittoRevealed != true, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(store.state.active?.dittoRevealed, true)
+        XCTAssertEqual(store.state.active?.prayers?.count, 2)
+        XCTAssertEqual(store.state.active?.prayers?.wasFutile, false, "the Ditto was rolled at hatch, not at purchase")
+        XCTAssertEqual(store.dexEntries.first?.prayers?.wasFutile, false)
+    }
+
 }
 
 @MainActor

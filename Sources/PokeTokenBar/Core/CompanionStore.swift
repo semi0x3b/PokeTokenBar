@@ -1747,6 +1747,9 @@ final class CompanionStore {
         m.form = nil
         // The hatch boost came from the disguise's line; from now on only a repeat Ditto earns it.
         m.hasGrowthBoost = state.hasCollectedFinal(forBaseID: dittoLine.baseID)
+        // Only the disguise species was fixed when the egg was bought; the Ditto was rolled at hatch, so the
+        // "species was decided at purchase" note no longer holds for this individual.
+        m.prayers?.wasFutile = false
         m.profile?.rebaseForSpeciesIdentity(from: previousRarity, to: dittoLine.rarity)
         if let details = pokemonDetailsByID[dittoLine.baseID] {
             m.profile?.enrich(with: details)
