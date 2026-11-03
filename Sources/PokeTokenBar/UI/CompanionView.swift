@@ -1794,6 +1794,16 @@ struct PokemonDetailView: View {
                 valuePair(store.l.gender, store.l.genderLabel(profile.gender))
                 valuePair(store.l.nature, entry.nature?.name(store.language) ?? "—")
             }
+            if let prayers = entry.prayers, prayers.count > 0 {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.l.prayerBornWith(prayers.count)).font(.callout)
+                    if prayers.wasFutile {
+                        Text(store.l.prayerFutileNote(purchased: prayers.eggWasPurchased))
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(store.l.ability).font(.system(size: 11)).foregroundStyle(.secondary)
                 if let name = profile.abilityName {
