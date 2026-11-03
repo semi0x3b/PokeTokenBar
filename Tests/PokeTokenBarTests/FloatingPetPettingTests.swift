@@ -177,10 +177,9 @@ final class StrokeHeartBubbleTests: XCTestCase {
         XCTAssertEqual(top, -25)
     }
 
-    func testAnchorIgnoresFewOutlierFramesThatReachTheCanvasTop() {
-        // Rotom-Heat-like: most frames start ~0.3 down the canvas, one frame jumps to the top.
-        var fractions = [CGFloat](repeating: 0.3, count: 19)
-        fractions.append(0)
+    func testAnchorIsTheMedianFrame() {
+        // Rotom-Heat-like: most frames start ~0.3 down the canvas, a few jump to the top.
+        let fractions: [CGFloat] = [0, 0, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3]
         XCTAssertEqual(SpriteVisibleTop.anchorFraction(of: fractions), 0.3, accuracy: 0.001)
         XCTAssertEqual(SpriteVisibleTop.anchorFraction(of: [0.2]), 0.2, accuracy: 0.001)
         XCTAssertEqual(SpriteVisibleTop.anchorFraction(of: []), 0)
@@ -200,6 +199,39 @@ final class StrokeHeartBubbleTests: XCTestCase {
         let image = NSImage(size: NSSize(width: side, height: side))
         image.addRepresentation(rep)
         XCTAssertEqual(SpriteVisibleTop.opaqueTopFraction(of: image), 0.3, accuracy: 0.001)
+    }
+
+    /// 10×10 test image from per-pixel opaque flags; row 0 is the top.
+    private func image(opaque: (_ row: Int, _ column: Int) -> Bool) throws -> NSImage {
+        let side = 10
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0))
+        let data = try XCTUnwrap(rep.bitmapData)
+        for i in 0..<(rep.bytesPerRow * side) { data[i] = 0 }
+        for row in 0..<side {
+            for column in 0..<side where opaque(row, column) {
+                let index = row * rep.bytesPerRow + column * 4
+                data[index] = 255; data[index + 3] = 255
+            }
+        }
+        let image = NSImage(size: NSSize(width: side, height: side))
+        image.addRepresentation(rep)
+        return image
+    }
+
+    func testSideColumnsDoNotDecideTheAnchor() throws {
+        // Tall side columns (raised arms) from row 0; the center (horn/head) only starts at row 5.
+        let sides = try image { row, column in
+            (column == 0 || column == 9) ? true : (column >= 4 && column <= 5 && row >= 5)
+        }
+        XCTAssertEqual(SpriteVisibleTop.opaqueTopFraction(of: sides), 0.5, accuracy: 0.001)
+    }
+
+    func testEmptyCentralBandFallsBackToTheFullWidth() throws {
+        let sidesOnly = try image { row, column in (column == 0 || column == 9) && row >= 2 }
+        XCTAssertEqual(SpriteVisibleTop.opaqueTopFraction(of: sidesOnly), 0.2, accuracy: 0.001)
     }
 
     func testEveryArtCellHasAColorOrIsTransparent() {
