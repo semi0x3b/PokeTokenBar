@@ -47,9 +47,10 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         alertActive || heartsShowing
     }
 
-    /// The native tooltip would overlap a bubble, so it is cleared while one shows.
-    static func nativeToolTip(_ text: String, bubbleShowing: Bool) -> String? {
-        bubbleShowing ? nil : text
+    /// The native tooltip would overlap the heart bubble, so it is cleared while hearts show.
+    /// Limit alerts keep the tooltip as before.
+    static func nativeToolTip(_ text: String, heartsShowing: Bool) -> String? {
+        heartsShowing ? nil : text
     }
 
     /// Chrome size plus the signals the view actually fails on: wrap count vs
@@ -308,7 +309,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             builtAnimated = wantAnimated
         }
         if let hosting = p.contentView as? PetHostingView {
-            hosting.toolTip = Self.nativeToolTip(currentHoverText(), bubbleShowing: showingBubble)
+            hosting.toolTip = Self.nativeToolTip(currentHoverText(), heartsShowing: hearts.isShowing)
             hosting.strokeDistance = max(10, CGFloat(store.floatingPetSize) * 0.15)
         }
         let petSize = CGFloat(store.floatingPetSize)

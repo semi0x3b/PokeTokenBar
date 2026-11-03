@@ -102,10 +102,10 @@ final class StrokeHeartBubbleTests: XCTestCase {
         XCTAssertFalse(FloatingPetController.isShowingBubble(alertActive: false, heartsShowing: false))
     }
 
-    func testNativeToolTipIsClearedWhileABubbleShows() {
-        XCTAssertNil(FloatingPetController.nativeToolTip("Today: 1 tokens", bubbleShowing: true))
-        XCTAssertEqual(FloatingPetController.nativeToolTip("Today: 1 tokens", bubbleShowing: false),
-                       "Today: 1 tokens")
+    func testNativeToolTipIsClearedOnlyWhileHeartsShow() {
+        XCTAssertNil(FloatingPetController.nativeToolTip("Today: 1 tokens", heartsShowing: true))
+        XCTAssertEqual(FloatingPetController.nativeToolTip("Today: 1 tokens", heartsShowing: false),
+                       "Today: 1 tokens", "a limit alert alone keeps the tooltip, as on main")
     }
 
     func testHeartStateStartsHidden() {
