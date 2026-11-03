@@ -1232,25 +1232,23 @@ struct L {
     /// `purchased` = the egg came from `buyEgg`; otherwise it arrived on its own.
     func prayerFutileNote(purchased: Bool) -> String {
         purchased
-            ? t("참고: 이 아이는 알을 산 순간 정해져 있었어요.", "Fun fact: this one was decided the moment you bought the egg.", "豆知識：この子はタマゴを買った瞬間に決まっていました。", "Dato curioso: este quedó decidido en el momento en que compraste el huevo.", "Info utile : celui-ci était décidé dès l'instant où tu as acheté l'œuf.", "Curiosidade: este foi decidido no instante em que você comprou o ovo.", "Fun Fact: Dieses Pokémon stand fest, sobald du das Ei gekauft hast.", "Забавный факт: этот покемон был решён в момент покупки яйца.")
-            : t("참고: 이 아이는 알이 온 순간 정해져 있었어요.", "Fun fact: this one was decided the moment the egg arrived.", "豆知識：この子はタマゴが届いた瞬間に決まっていました。", "Dato curioso: este quedó decidido en el momento en que llegó el huevo.", "Info utile : celui-ci était décidé dès l'arrivée de l'œuf.", "Curiosidade: este foi decidido no instante em que o ovo chegou.", "Fun Fact: Dieses Pokémon stand fest, sobald das Ei ankam.", "Забавный факт: этот покемон был решён в момент появления яйца.")
+            ? t("참고: 이 아이는 알을 산 순간 정해져 있었어요.", "Fun fact: this one was decided the moment you bought the egg.", "豆知識：この子はタマゴを買った瞬間に決まっていました。", "Dato curioso: este quedó decidido en el momento en que compraste el huevo.", "Info utile : celui-ci était décidé dès l'instant où tu as acheté l'œuf.", "Curiosidade: este foi decidido no instante em que você comprou o ovo.", "Wusstest du schon? Dieses Pokémon stand fest, sobald du das Ei gekauft hast.", "Забавный факт: этот покемон был решён в момент покупки яйца.")
+            : t("참고: 이 아이는 알이 온 순간 정해져 있었어요.", "Fun fact: this one was decided the moment the egg arrived.", "豆知識：この子はタマゴが届いた瞬間に決まっていました。", "Dato curioso: este quedó decidido en el momento en que llegó el huevo.", "Info utile : celui-ci était décidé dès l'arrivée de l'œuf.", "Curiosidade: este foi decidido no instante em que o ovo chegou.", "Wusstest du schon? Dieses Pokémon stand fest, sobald das Ei ankam.", "Забавный факт: этот покемон был решён в момент появления яйца.")
     }
 
-    /// Which quip a prayer count earns (0...6). Pure so the boundaries can be tested.
-    static func prayerQuipTier(_ prayers: Int) -> Int {
-        switch prayers {
-        case ..<2: return 0
-        case 2...4: return 1
-        case 5...9: return 2
-        case 10...29: return 3
-        case 30...49: return 4
-        case 50...99: return 5
-        default: return 6
-        }
+    /// Prayers per quip (and per usage refresh): the joke advances every 30 prayers.
+    static let prayersPerQuip = 30
+    static let prayerQuipCount = 11
+
+    /// Index into the ordered quip list: `count / 30`, capped at the last one. nil at 0 prayers (nothing to say yet).
+    static func prayerQuipIndex(_ prayers: Int) -> Int? {
+        guard prayers > 0 else { return nil }
+        return min(prayers / prayersPerQuip, prayerQuipCount - 1)
     }
 
     /// Floating-pet hover line: "{n} prayers · {quip}".
     func prayerHoverLine(_ n: Int) -> String {
+        guard n > 0 else { return "" }
         let count = n == 1
             ? t("기도 1회", "1 prayer", "お祈り1回", "1 oración", "1 prière", "1 oração", "1 Gebet", "Молитв: 1")
             : t("기도 \(n)회", "\(n) prayers", "お祈り\(n)回", "\(n) oraciones", "\(n) prières", "\(n) orações", "\(n) Gebete", "Молитв: \(n)")
@@ -1258,13 +1256,17 @@ struct L {
     }
 
     func prayerQuip(_ n: Int) -> String {
-        switch Self.prayerQuipTier(n) {
-        case 0: return t("일단 찔러봄", "just testing the line", "とりあえず回線テスト中", "probando la línea", "on teste la ligne", "só testando a linha", "Leitung wird getestet", "проверяем связь")
-        case 1: return t("하늘이 읽씹 중", "heaven left you on read", "天国は既読スルー中", "el cielo te dejó en visto", "le ciel t'a mis en vu", "o céu te deixou no vácuo", "der Himmel lässt dich auf gelesen", "небеса прочитали и не ответили")
+        switch Self.prayerQuipIndex(n) ?? 0 {
+        case 0: return t("일단 한번 빌어봄", "just trying it out", "とりあえず祈ってみた", "probando a ver qué pasa", "juste pour essayer", "só para testar", "einfach mal ausprobiert", "просто попробовали")
+        case 1: return t("하늘이 아직 확인 안 함", "heaven hasn't checked yet", "天国はまだ確認していない", "el cielo aún no lo ha revisado", "le ciel n'a pas encore regardé", "o céu ainda não conferiu", "der Himmel hat noch nicht nachgesehen", "небеса ещё не проверили")
         case 2: return t("알이 살짝 부담스러워함", "the egg feels a little pressured", "タマゴがちょっとプレッシャーを感じてる", "el huevo siente algo de presión", "l'œuf se sent un peu sous pression", "o ovo está sentindo a pressão", "dem Ei wird das langsam zu viel Druck", "яйцу слегка не по себе")
-        case 3: return t("손 모으는 폼이 제법 프로", "your praying form is getting pro", "手を合わせるフォームが様になってきた", "ya rezas con técnica de profesional", "ta technique de prière devient pro", "sua pose de oração já está profissional", "deine Gebetshaltung wird professionell", "молитвенная стойка уже как у профи")
-        case 4: return t("하늘 고객센터 대기 순번 3,812번", "you're #3,812 in heaven's support queue", "天国サポートセンターの待ち順は3,812番", "eres el n.º 3.812 en la cola del cielo", "tu es le n° 3 812 dans la file du SAV céleste", "você é o nº 3.812 na fila do suporte celestial", "du bist Nr. 3.812 in der Warteschlange des Himmels", "вы 3 812-й в очереди небесной поддержки")
-        case 5: return t("이쯤 되면 알도 같이 빌어줌", "at this point the egg is praying with you", "ここまで来るとタマゴも一緒に祈ってる", "a estas alturas el huevo reza contigo", "à ce stade, l'œuf prie avec toi", "a essa altura o ovo reza junto", "mittlerweile betet das Ei mit", "теперь яйцо молится вместе с вами")
+        case 3: return t("손 모으는 자세가 제법 프로", "your praying form is getting pro", "手を合わせるフォームが様になってきた", "ya rezas con técnica de profesional", "ta technique de prière devient pro", "sua pose de oração já está profissional", "deine Gebetshaltung wird professionell", "молитвенная стойка уже как у профи")
+        case 4: return t("하늘 서버 응답 지연 중", "heaven's servers are lagging", "天国のサーバーが応答遅延中", "los servidores del cielo van con lag", "les serveurs du ciel rament", "os servidores do céu estão com lag", "die Server des Himmels laggen", "серверы небес лагают")
+        case 5: return t("하늘 대기열 3,812번째", "you're #3,812 in heaven's queue", "天国の順番待ち3,812番目", "eres el n.º 3.812 en la cola del cielo", "tu es n° 3 812 dans la file du ciel", "você é o nº 3.812 na fila do céu", "du bist Nr. 3.812 in der Warteschlange des Himmels", "вы 3 812-й в очереди небес")
+        case 6: return t("손바닥이 닳는 중", "your palms are wearing thin", "手のひらがすり減ってきた", "las palmas de tus manos se desgastan", "tes paumes s'usent", "suas palmas estão se desgastando", "deine Handflächen werden dünn", "ладони понемногу стираются")
+        case 7: return t("이쯤 되면 알도 같이 빌어줌", "at this point the egg is praying with you", "ここまで来るとタマゴも一緒に祈ってる", "a estas alturas el huevo reza contigo", "à ce stade, l'œuf prie avec toi", "a essa altura o ovo reza junto", "mittlerweile betet das Ei mit", "теперь яйцо молится вместе с вами")
+        case 8: return t("하늘: \"접수했습니다. 검토 후 답변드릴게요\"", "heaven: \"received, we'll get back to you\"", "天国「受け付けました。確認後ご連絡します」", "el cielo: «recibido, le responderemos»", "le ciel : « bien reçu, nous revenons vers vous »", "o céu: \"recebido, retornaremos o contato\"", "Himmel: „Eingegangen, wir melden uns bei Ihnen“", "небеса: «заявка принята, мы с вами свяжемся»")
+        case 9: return t("알이 방금 \"그만…\"이라고 한 것 같음", "the egg just whispered \"please stop\"", "タマゴが今「やめて…」ってささやいた気がする", "creo que el huevo acaba de susurrar «para…»", "l'œuf vient de murmurer « arrête… »", "o ovo acabou de sussurrar \"para…\"", "das Ei hat gerade „hör auf…“ geflüstert", "яйцо только что прошептало «хватит…»")
         default: return t("전설 나오면 이건 실력임", "if a legendary hatches, that's pure skill", "伝説が出たらそれは実力", "si sale un legendario, es pura habilidad", "si un légendaire éclot, c'est du talent pur", "se sair um lendário, é pura habilidade", "schlüpft ein Legendäres, ist das reine Skill", "вылупится легендарный — это чистый скилл")
         }
     }
@@ -1272,7 +1274,7 @@ struct L {
     /// Hatch notification body once the egg was prayed over; the joke follows the outcome.
     func notifPrayerHatchBody(_ name: String, prayers n: Int, shiny: Bool, rarity: Rarity) -> String {
         if shiny && rarity == .legendary {
-            return t("기도 \(n)번… 하늘이 진심이었다. 이로치 \(name)!", "\(n) prayers… heaven went all in. Shiny \(name)!", "お祈り\(n)回… 天も本気だった。色違いの\(name)！", "¡\(n) oraciones… el cielo fue con todo. \(name) variocolor!", "\(n) prières… le ciel a tout donné. \(name) chromatique !", "\(n) orações… o céu foi com tudo. \(name) shiny!", "\(n) Gebete… der Himmel hat alles gegeben. Schillerndes \(name)!", "\(n) молитв… небеса выложились по полной. Шайни \(name)!")
+            return t("기도 \(n)번… 하늘이 진심이었다. 이로치 \(name)!", "\(n) prayers… heaven went all in. Shiny \(name)!", "お祈り\(n)回… 天も本気だった。色違いの\(name)！", "¡\(n) oraciones… el cielo fue con todo. \(name) variocolor!", "\(n) prières… le ciel a tout donné. \(name) chromatique !", "\(n) orações… o céu foi com tudo. \(name) shiny!", "\(n) Gebete… der Himmel hat alles gegeben. Schillerndes \(name)!", "\(n) молитв… небеса постарались на все сто. Шайни \(name)!")
         }
         if rarity == .legendary {
             return t("기도 \(n)번… 통했다?! \(KoreanParticle.subject.attach(to: name)) 나왔어요!", "\(n) prayers… it worked?! \(name) hatched!", "お祈り\(n)回… 通じた？！\(name) が生まれました！", "\(n) oraciones… ¿funcionó?! ¡Salió \(name)!", "\(n) prières… ça a marché ?! \(name) est sorti !", "\(n) orações… funcionou?! Saiu \(name)!", "\(n) Gebete… hat es gewirkt?! \(name) ist geschlüpft!", "\(n) молитв… сработало?! Вылупился \(name)!")
@@ -1281,7 +1283,7 @@ struct L {
             return t("기도 \(n)번에 반짝이까지?! \(KoreanParticle.subject.attach(to: name)) 나왔어요!", "\(n) prayers AND it's shiny?! \(name) hatched!", "お祈り\(n)回で色違いまで？！\(name) が生まれました！", "¿\(n) oraciones Y encima variocolor?! ¡Salió \(name)!", "\(n) prières ET en plus chromatique ?! \(name) est sorti !", "\(n) orações E ainda shiny?! Saiu \(name)!", "\(n) Gebete UND dann noch schillernd?! \(name) ist geschlüpft!", "\(n) молитв И ещё шайни?! Вылупился \(name)!")
         }
         if rarity == .common {
-            return t("기도 \(n)번 끝에 \(KoreanParticle.subject.attach(to: name)) 나왔어요. 하늘도 오늘 바빴나 봐요.", "\(n) prayers later: \(name). Heaven must be swamped today.", "お祈り\(n)回の末、\(name) が生まれました。天国も今日は忙しかったみたい。", "Tras \(n) oraciones: \(name). El cielo debe de andar saturado hoy.", "Après \(n) prières : \(name). Le ciel doit être débordé aujourd'hui.", "Após \(n) orações: \(name). O céu deve estar lotado hoje.", "Nach \(n) Gebeten: \(name). Der Himmel hat heute wohl viel zu tun.", "После \(n) молитв: \(name). У небес сегодня, видимо, аврал.")
+            return t("기도 \(n)번 끝에 \(KoreanParticle.subject.attach(to: name)) 나왔어요. 하늘도 오늘 바빴나 봐요.", "\(n) prayers later: \(name). Heaven must be swamped today.", "お祈り\(n)回の末、\(name) が生まれました。天国も今日は忙しかったみたい。", "Tras \(n) oraciones: \(name). El cielo debe de andar saturado hoy.", "Après \(n) prières : \(name). Le ciel doit être débordé aujourd'hui.", "Após \(n) orações: \(name). O céu deve estar lotado hoje.", "Nach \(n) Gebeten: \(name). Der Himmel hat heute wohl viel zu tun.", "После \(n) молитв: \(name). У небес сегодня, видимо, много дел.")
         }
         return t("기도 \(n)번 끝에 \(KoreanParticle.subject.attach(to: name)) 나왔어요. 반은 통한 걸로 칩시다.", "\(n) prayers later: \(name). Let's call it half a miracle.", "お祈り\(n)回の末、\(name) が生まれました。半分は通じたってことにしよう。", "Tras \(n) oraciones: \(name). Digamos que fue medio milagro.", "Après \(n) prières : \(name). Disons que c'est un demi-miracle.", "Após \(n) orações: \(name). Vamos chamar de meio milagre.", "Nach \(n) Gebeten: \(name). Nennen wir es ein halbes Wunder.", "После \(n) молитв: \(name). Считаем это половиной чуда.")
     }

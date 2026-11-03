@@ -104,29 +104,15 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     static func clickAction(subjectIsEgg: Bool) -> ClickAction { subjectIsEgg ? .pray : .openPopover }
 
-    /// Praying refreshes usage at growing intervals: after 30 prayers, then 30 more, then 40 more, then 50 more...
-    /// i.e. at the cumulative counts 30, 60, 100, 150 (step * k(k+1)/2 without its first term, 10), so the egg's
+    /// Praying refreshes usage every 30 prayers (30, 60, 90...), the same step as the hover quip, so the egg's
     /// progress moves without a request per click.
-    static let prayerRefreshStep = 10
+    static let prayersPerRefresh = L.prayersPerQuip
     /// Minimum gap between prayer-triggered refreshes. A refresh also queries the limit endpoints
     /// (Claude, Codex, Cursor, Antigravity), which have their own rate limits.
     static let prayerRefreshInterval: TimeInterval = 30
 
-    /// How many refresh milestones `count` prayers have passed: the largest k with step * k(k+1)/2 <= count,
-    /// minus one because the first term (10 prayers) is skipped.
-    static func prayerRefreshMilestone(for count: Int) -> Int {
-        max(0, triangularIndex(for: count) - 1)
-    }
-
-    private static func triangularIndex(for count: Int) -> Int {
-        guard count >= prayerRefreshStep else { return 0 }
-        let triangular = Double(count) / Double(prayerRefreshStep)
-        var k = Int(((-1 + (1 + 8 * triangular).squareRoot()) / 2).rounded(.down))
-        // Correct the float estimate at the exact boundaries.
-        while prayerRefreshStep * (k + 1) * (k + 2) / 2 <= count { k += 1 }
-        while k > 0 && prayerRefreshStep * k * (k + 1) / 2 > count { k -= 1 }
-        return k
-    }
+    /// How many refresh milestones `count` prayers have passed.
+    static func prayerRefreshMilestone(for count: Int) -> Int { max(0, count) / prayersPerRefresh }
 
     /// Refresh once a milestone is passed that was not refreshed yet AND the floor since the last refresh has passed.
     /// A milestone held back by the floor is not lost: the next click after the floor still sees it as new.
@@ -139,6 +125,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private lazy var clickRouter = PetClickRouter(
         pray: { [weak self] in self?.companion.pray() },
         prayerCount: { [weak self] in self?.companion.state.eggPrayers?.count ?? 0 },
+        didPray: { [weak self] in self?.refreshHoverAfterPrayer() },
         spawnEmoji: { [weak self] in self?.prayerBurst.spawn() },
         refreshUsage: { [weak self] in
             guard let store = self?.store else { return }
@@ -360,6 +347,16 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             prayers: companion.representativeSubject.speciesID == nil ? companion.state.eggPrayers?.count ?? 0 : 0)
     }
 
+    /// A prayer changes the count in the hover text. Rebuild it right here instead of waiting for the observation
+    /// round trip: re-set the native tooltip and redraw the callout if it is open.
+    private func refreshHoverAfterPrayer() {
+        if let hosting = panel?.contentView as? PetHostingView {
+            hosting.toolTip = nil
+            hosting.toolTip = currentHoverText()
+        }
+        if hoverPanel?.isVisible == true { showHoverCallout() }
+    }
+
     private func showHoverCallout() {
         guard let pet = panel, pet.isVisible else { return }
         // Don't cover an active limit bubble — the speech bubble is the priority surface.
@@ -477,6 +474,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 final class PetClickRouter {
     private let pray: () -> Void
     private let prayerCount: () -> Int
+    private let didPray: () -> Void
     private let spawnEmoji: () -> Void
     private let refreshUsage: () -> Void
     private let openPopover: () -> Void
@@ -485,10 +483,11 @@ final class PetClickRouter {
     /// In memory only: after a restart the first click past a milestone may refresh once more, which is harmless.
     private var lastRefreshedMilestone = 0
 
-    init(pray: @escaping () -> Void, prayerCount: @escaping () -> Int, spawnEmoji: @escaping () -> Void, refreshUsage: @escaping () -> Void,
+    init(pray: @escaping () -> Void, prayerCount: @escaping () -> Int, didPray: @escaping () -> Void = {}, spawnEmoji: @escaping () -> Void, refreshUsage: @escaping () -> Void,
          openPopover: @escaping () -> Void, clock: @escaping () -> Date) {
         self.pray = pray
         self.prayerCount = prayerCount
+        self.didPray = didPray
         self.spawnEmoji = spawnEmoji
         self.refreshUsage = refreshUsage
         self.openPopover = openPopover
@@ -500,6 +499,7 @@ final class PetClickRouter {
         case .pray:
             pray()
             spawnEmoji()
+            didPray()
             let count = prayerCount()
             let milestone = FloatingPetController.prayerRefreshMilestone(for: count)
             if milestone < lastRefreshedMilestone { lastRefreshedMilestone = milestone }   // a new egg started over
