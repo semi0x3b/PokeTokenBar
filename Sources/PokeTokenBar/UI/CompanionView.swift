@@ -223,12 +223,12 @@ struct SpriteView: View {
             .frame(width: size, height: size)
     }
 
-    /// Union over the animation frames (the topmost of them), so the anchor does not jitter per frame.
+    /// One anchor for the whole animation (see `SpriteVisibleTop.anchorFraction`), so it does not jitter per frame.
     private var visibleTop: CGFloat? {
         guard reportsVisibleTop else { return nil }
         let images = frames.isEmpty ? (subject.image.map { [$0] } ?? []) : frames.map(\.image)
         guard let first = images.first else { return nil }
-        let fraction = images.map(SpriteVisibleTop.opaqueTopFraction).min() ?? 0
+        let fraction = SpriteVisibleTop.anchorFraction(of: images.map(SpriteVisibleTop.opaqueTopFraction))
         return SpriteVisibleTop.inset(box: size, imageSize: first.size, opaqueTopFraction: fraction)
     }
 

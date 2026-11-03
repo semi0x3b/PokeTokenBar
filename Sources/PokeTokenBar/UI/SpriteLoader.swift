@@ -379,6 +379,9 @@ enum SpriteFit {
 /// instead of the (often emptier) box. Most Gen-V canvases do not fill the box.
 enum SpriteVisibleTop {
     private static let alphaThreshold: UInt8 = 16
+    /// The bubble's tail points at the horizontal center, so only this middle band of the image
+    /// decides the anchor. Raised arms, ears and tails at the sides must not.
+    private static let centralBand: ClosedRange<Double> = 0.35...0.65
     /// Opaque-row scan results, per decoded image. Frames and the egg are decoded once, then reused.
     nonisolated(unsafe) private static let cache = NSCache<NSImage, NSNumber>()
 
@@ -390,13 +393,24 @@ enum SpriteVisibleTop {
         return (box - fit.height) / 2 + min(max(opaqueTopFraction, 0), 1) * fit.height
     }
 
-    /// Y of a bubble's top edge, measured from the box top, so its tail tip lands `overlap` pt
-    /// below the sprite's visible top.
-    static func bubbleTopOffset(visibleTop: CGFloat, bubbleHeight: CGFloat, overlap: CGFloat) -> CGFloat {
-        visibleTop + overlap - bubbleHeight
+    /// Which top to anchor to across an animation: the median frame. The minimum would follow the few
+    /// frames that jump or stretch to the canvas top (Rotom-Heat: min 0, typical 0.3), dragging the
+    /// bubble far above the sprite. The sprite may still rise into the bubble on frames above the
+    /// median; the bubble is drawn over it.
+    static func anchorFraction(of frameFractions: [CGFloat]) -> CGFloat {
+        guard !frameFractions.isEmpty else { return 0 }
+        return frameFractions.sorted()[frameFractions.count / 2]
     }
 
-    /// Share of the image height above its first non-transparent row; 0 when it cannot be read.
+    /// Y of a bubble's top edge, measured from the box top, so its tail tip lands `overlap` pt
+    /// below the sprite's visible top. Rounded to whole points: a pixel-art bubble drawn at a
+    /// fractional offset leaves seams and blurred edges.
+    static func bubbleTopOffset(visibleTop: CGFloat, bubbleHeight: CGFloat, overlap: CGFloat) -> CGFloat {
+        (visibleTop + overlap - bubbleHeight).rounded()
+    }
+
+    /// Share of the image height above the first non-transparent row of the central band
+    /// (the whole width when the band is empty); 0 when the image cannot be read.
     static func opaqueTopFraction(of image: NSImage) -> CGFloat {
         if let cached = cache.object(forKey: image) { return CGFloat(cached.doubleValue) }
         let fraction = scanOpaqueTopFraction(of: image)
@@ -415,12 +429,18 @@ enum SpriteVisibleTop {
         else { return 0 }
         context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
         let pixels = data.bindMemory(to: UInt8.self, capacity: cg.width * cg.height * 4)
+        let bandStart = Int(Double(cg.width) * centralBand.lowerBound)
+        let bandEnd = max(bandStart + 1, Int(Double(cg.width) * centralBand.upperBound))
         // Memory row 0 is the top row of the drawn image.
-        for row in 0..<cg.height {
-            for column in 0..<cg.width where pixels[(row * cg.width + column) * 4 + 3] > alphaThreshold {
-                return CGFloat(row) / CGFloat(cg.height)
+        func firstOpaqueRow(columns: Range<Int>) -> Int? {
+            for row in 0..<cg.height {
+                for column in columns where pixels[(row * cg.width + column) * 4 + 3] > alphaThreshold {
+                    return row
+                }
             }
+            return nil
         }
-        return 0
+        let row = firstOpaqueRow(columns: bandStart..<min(bandEnd, cg.width)) ?? firstOpaqueRow(columns: 0..<cg.width)
+        return row.map { CGFloat($0) / CGFloat(cg.height) } ?? 0
     }
 }
