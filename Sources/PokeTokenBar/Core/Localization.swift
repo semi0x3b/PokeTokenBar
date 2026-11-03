@@ -1233,21 +1233,19 @@ struct L {
             : t("참고: 이 아이는 알이 온 순간 정해져 있었어요.", "Fun fact: this one was decided the moment the egg arrived.", "豆知識：この子はタマゴが届いた瞬間に決まっていました。", "Dato curioso: este quedó decidido en el momento en que llegó el huevo.", "Info utile : celui-ci était décidé dès l'arrivée de l'œuf.", "Curiosidade: este foi decidido no instante em que o ovo chegou.", "Fun Fact: Dieses Pokémon stand fest, sobald das Ei ankam.", "Забавный факт: этот покемон был решён в момент появления яйца.")
     }
 
-    /// Which quip a prayer count earns (0...6). Pure so the boundaries can be tested.
-    static func prayerQuipTier(_ prayers: Int) -> Int {
-        switch prayers {
-        case ..<2: return 0
-        case 2...4: return 1
-        case 5...9: return 2
-        case 10...29: return 3
-        case 30...49: return 4
-        case 50...99: return 5
-        default: return 6
-        }
+    /// Prayers per quip (and per usage refresh): the joke advances every 30 prayers.
+    static let prayersPerQuip = 30
+    static let prayerQuipCount = 11
+
+    /// Index into the ordered quip list: `count / 30`, capped at the last one. nil at 0 prayers (nothing to say yet).
+    static func prayerQuipIndex(_ prayers: Int) -> Int? {
+        guard prayers > 0 else { return nil }
+        return min(prayers / prayersPerQuip, prayerQuipCount - 1)
     }
 
     /// Floating-pet hover line: "{n} prayers · {quip}".
     func prayerHoverLine(_ n: Int) -> String {
+        guard n > 0 else { return "" }
         let count = n == 1
             ? t("기도 1회", "1 prayer", "お祈り1回", "1 oración", "1 prière", "1 oração", "1 Gebet", "Молитв: 1")
             : t("기도 \(n)회", "\(n) prayers", "お祈り\(n)回", "\(n) oraciones", "\(n) prières", "\(n) orações", "\(n) Gebete", "Молитв: \(n)")
@@ -1255,13 +1253,17 @@ struct L {
     }
 
     func prayerQuip(_ n: Int) -> String {
-        switch Self.prayerQuipTier(n) {
+        switch Self.prayerQuipIndex(n) ?? 0 {
         case 0: return t("일단 찔러봄", "just testing the line", "とりあえず回線テスト中", "probando la línea", "on teste la ligne", "só testando a linha", "Leitung wird getestet", "проверяем связь")
         case 1: return t("하늘이 읽씹 중", "heaven left you on read", "天国は既読スルー中", "el cielo te dejó en visto", "le ciel t'a mis en vu", "o céu te deixou no vácuo", "der Himmel lässt dich auf gelesen", "небеса прочитали и не ответили")
         case 2: return t("알이 살짝 부담스러워함", "the egg feels a little pressured", "タマゴがちょっとプレッシャーを感じてる", "el huevo siente algo de presión", "l'œuf se sent un peu sous pression", "o ovo está sentindo a pressão", "dem Ei wird das langsam zu viel Druck", "яйцу слегка не по себе")
         case 3: return t("손 모으는 폼이 제법 프로", "your praying form is getting pro", "手を合わせるフォームが様になってきた", "ya rezas con técnica de profesional", "ta technique de prière devient pro", "sua pose de oração já está profissional", "deine Gebetshaltung wird professionell", "молитвенная стойка уже как у профи")
-        case 4: return t("하늘 고객센터 대기 순번 3,812번", "you're #3,812 in heaven's support queue", "天国サポートセンターの待ち順は3,812番", "eres el n.º 3.812 en la cola del cielo", "tu es le n° 3 812 dans la file du SAV céleste", "você é o nº 3.812 na fila do suporte celestial", "du bist Nr. 3.812 in der Warteschlange des Himmels", "вы 3 812-й в очереди небесной поддержки")
-        case 5: return t("이쯤 되면 알도 같이 빌어줌", "at this point the egg is praying with you", "ここまで来るとタマゴも一緒に祈ってる", "a estas alturas el huevo reza contigo", "à ce stade, l'œuf prie avec toi", "a essa altura o ovo reza junto", "mittlerweile betet das Ei mit", "теперь яйцо молится вместе с вами")
+        case 4: return t("하늘 서버 응답 지연 중", "heaven's servers are lagging", "天国のサーバーが応答遅延中", "los servidores del cielo van con lag", "les serveurs du ciel rament", "os servidores do céu estão com lag", "die Server des Himmels laggen", "серверы небес лагают")
+        case 5: return t("하늘 고객센터 대기 순번 3,812번", "you're #3,812 in heaven's support queue", "天国サポートセンターの待ち順は3,812番", "eres el n.º 3.812 en la cola del cielo", "tu es le n° 3 812 dans la file du SAV céleste", "você é o nº 3.812 na fila do suporte celestial", "du bist Nr. 3.812 in der Warteschlange des Himmels", "вы 3 812-й в очереди небесной поддержки")
+        case 6: return t("손바닥 지문 닳는 중", "your palms are losing their fingerprints", "手のひらの指紋がすり減ってきた", "tus palmas están perdiendo las huellas", "tes paumes perdent leurs empreintes", "suas palmas estão perdendo as digitais", "deinen Handflächen gehen die Fingerabdrücke aus", "на ладонях стираются отпечатки")
+        case 7: return t("이쯤 되면 알도 같이 빌어줌", "at this point the egg is praying with you", "ここまで来るとタマゴも一緒に祈ってる", "a estas alturas el huevo reza contigo", "à ce stade, l'œuf prie avec toi", "a essa altura o ovo reza junto", "mittlerweile betet das Ei mit", "теперь яйцо молится вместе с вами")
+        case 8: return t("하늘: \"접수됐습니다. 검토 후 연락드릴게요\"", "heaven: \"received, we'll get back to you\"", "天国「受け付けました。確認後ご連絡します」", "el cielo: «recibido, le responderemos»", "le ciel : « bien reçu, nous revenons vers vous »", "o céu: \"recebido, retornaremos o contato\"", "Himmel: „Eingegangen, wir melden uns bei Ihnen“", "небеса: «заявка принята, мы с вами свяжемся»")
+        case 9: return t("알이 방금 \"그만해…\"라고 한 것 같음", "the egg just whispered \"please stop\"", "タマゴが今「やめて…」ってささやいた気がする", "creo que el huevo acaba de susurrar «para…»", "l'œuf vient de murmurer « arrête… »", "o ovo acabou de sussurrar \"para…\"", "das Ei hat gerade „hör auf…“ geflüstert", "яйцо только что прошептало «хватит…»")
         default: return t("전설 나오면 이건 실력임", "if a legendary hatches, that's pure skill", "伝説が出たらそれは実力", "si sale un legendario, es pura habilidad", "si un légendaire éclot, c'est du talent pur", "se sair um lendário, é pura habilidade", "schlüpft ein Legendäres, ist das reine Skill", "вылупится легендарный — это чистый скилл")
         }
     }
