@@ -1323,6 +1323,7 @@ final class CompanionStore {
     func pray() {
         guard state.active == nil else { return }
         var record = state.eggPrayers ?? PrayerRecord(count: 0, wasFutile: state.pendingHatchID != nil,
+                                                      rolledSpeciesID: state.pendingHatchID,
                                                       eggWasPurchased: state.eggWasPurchased)
         record.count += 1
         state.eggPrayers = record
@@ -1681,7 +1682,9 @@ final class CompanionStore {
         let overflow = max(0, state.eggUsage - eggHatchThreshold)
         state.eggUsage = 0
         state.eggTier = nil   // 보증은 이 부화로 소비된다(다음 알은 다시 무보증)
-        let prayers = state.eggPrayers   // 부화체에 옮기고 알 쪽은 비운다
+        var prayers = state.eggPrayers   // 부화체에 옮기고 알 쪽은 비운다
+        // The tier guard above can discard a pre-roll and roll again: the note only holds if the same species hatched.
+        if let rolled = prayers?.rolledSpeciesID, rolled != line.baseID { prayers?.wasFutile = false }
         state.resetEggPrayers()
         // 개체 롤 — shiny(1/64, 부적 1/48)·성격(25종)은 부화 순간 확정, 진화해도 유지.
         // 알림 문구는 이 판정과 같은 분모를 보여준다.
@@ -1761,6 +1764,9 @@ final class CompanionStore {
         m.form = nil
         // The hatch boost came from the disguise's line; from now on only a repeat Ditto earns it.
         m.hasGrowthBoost = state.hasCollectedFinal(forBaseID: dittoLine.baseID)
+        // Only the disguise species was fixed when the egg was bought; the Ditto was rolled at hatch, so the
+        // "species was decided at purchase" note no longer holds for this individual.
+        m.prayers?.wasFutile = false
         m.profile?.rebaseForSpeciesIdentity(from: previousRarity, to: dittoLine.rarity)
         if let details = pokemonDetailsByID[dittoLine.baseID] {
             m.profile?.enrich(with: details)
