@@ -51,14 +51,15 @@ final class EggPrayerRenderTests: XCTestCase {
         return store
     }
 
-    private func writePNG<V: View>(_ view: V, height: CGFloat, to url: URL) async throws {
+    private func writePNG<V: View>(_ view: V, height: CGFloat, to url: URL, dark: Bool = false) async throws {
         let host = NSHostingView(rootView: view.frame(width: PopoverMetrics.contentWidth, height: height)
-            .background(Color.white).environment(\.colorScheme, .light))
+            .background(dark ? Color(white: 0.16) : Color.white)
+            .environment(\.colorScheme, dark ? .dark : .light))
         host.frame = NSRect(x: 0, y: 0, width: PopoverMetrics.contentWidth, height: height)
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: host.frame.width, height: height),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         window.contentView = host
         window.orderFront(nil)
         windows.append(window)
@@ -95,6 +96,28 @@ final class EggPrayerRenderTests: XCTestCase {
                                              spriteStore: SpriteStore(directory: spriteDirectory))
                 try await writePNG(view, height: 520, to: output.appendingPathComponent("\(name)-\(tag).png"))
             }
+        }
+    }
+
+    /// The floating egg with three 🙏 frozen mid-flight at fixed spots (the live ones use random x).
+    func testWriteFloatingEggWithPrayers() async throws {
+        guard let directory = ProcessInfo.processInfo.environment["PTB_PRAYER_RENDER_DIR"] else {
+            throw XCTSkip("PTB_PRAYER_RENDER_DIR not set")
+        }
+        let petSize: CGFloat = 128
+        let emoji = PrayerEmojiLayer.emojiSize(petSize: petSize)
+        let egg = ZStack {
+            SpriteView(speciesID: nil, size: petSize, animated: false, shiny: false)
+                .frame(width: petSize, height: petSize)
+            ForEach([(0.2, 0.3), (0.55, 0.55), (0.85, 0.8)], id: \.0) { fraction, progress in
+                PrayerEmojiFrame(xFraction: fraction, petSize: petSize, emojiSize: emoji, progress: progress)
+            }
+        }
+        .frame(width: petSize, height: petSize)
+        for (dark, tag) in [(false, "light"), (true, "dark")] {
+            try await writePNG(egg, height: 200,
+                               to: URL(fileURLWithPath: directory).appendingPathComponent("floating-egg-3-prayer-emojis-\(tag).png"),
+                               dark: dark)
         }
     }
 }

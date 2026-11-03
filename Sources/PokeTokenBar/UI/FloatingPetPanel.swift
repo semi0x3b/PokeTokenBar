@@ -76,6 +76,23 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     private var onOpenPopover: (() -> Void)?
     private var onHide: (() -> Void)?
+    /// Owned here and handed to the view once, so a prayer never rebuilds the hosting `rootView`.
+    private let prayerBurst = PrayerBurst()
+
+    /// What a click on the pet does: an egg is prayed over, a hatched Pokémon opens the popover.
+    enum ClickAction: Equatable { case pray, openPopover }
+
+    static func clickAction(subjectIsEgg: Bool) -> ClickAction { subjectIsEgg ? .pray : .openPopover }
+
+    private func handleClick() {
+        switch Self.clickAction(subjectIsEgg: companion.representativeSubject.speciesID == nil) {
+        case .pray:
+            companion.pray()
+            prayerBurst.spawn()
+        case .openPopover:
+            onOpenPopover?()
+        }
+    }
 
     init(store: UsageStore, companion: CompanionStore, defaults: UserDefaults = .standard,
          onOpenPopover: (() -> Void)? = nil, onHide: (() -> Void)? = nil) {
@@ -110,6 +127,8 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             _ = store.highestLimitUtilization
             _ = store.limitDisplayMode   // hover 툴팁 %가 파생되는 값 — 수동 관찰 표면은 파생 원천을 직접 추적(defect-log §표시·UI)
             _ = companion.language
+            _ = companion.state.eggPrayers   // hover text shows the prayer count
+            _ = companion.representativeSubject
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -217,8 +236,9 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         let wantAnimated = Self.shouldAnimate(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if p.contentView == nil || builtAnimated != wantAnimated {
             let hosting = PetHostingView(rootView: AnyView(
-                FloatingPetView(animated: wantAnimated).environment(store).environment(companion)))
+                FloatingPetView(animated: wantAnimated, burst: prayerBurst).environment(store).environment(companion)))
             hosting.onOpenPopover = onOpenPopover
+            hosting.onClick = { [weak self] in self?.handleClick() }
             hosting.onHide = onHide
             hosting.languageProvider = { [weak self] in self?.companion.language ?? .systemDefault }
             hosting.onHoverChange = { [weak self] hovering in
@@ -250,7 +270,8 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             todayTokens: store.todayTotalTokens,
             limitUtilization: store.highestLimitUtilization,
             mode: store.limitDisplayMode,
-            l: L(companion.language))
+            l: L(companion.language),
+            prayers: companion.representativeSubject.speciesID == nil ? companion.state.eggPrayers?.count ?? 0 : 0)
     }
 
     private func showHoverCallout() {
@@ -366,6 +387,8 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
 final class PetHostingView: NSHostingView<AnyView> {
     var onOpenPopover: (() -> Void)?
+    /// A plain click on the pet. The controller decides between praying and opening the popover.
+    var onClick: (() -> Void)?
     var onHide: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
     var languageProvider: () -> AppLanguage = { .systemDefault }
@@ -420,7 +443,7 @@ final class PetHostingView: NSHostingView<AnyView> {
         }
         guard !didDrag, let start = mouseDownScreen else { return }
         if Self.isClick(from: start, to: NSEvent.mouseLocation) {
-            onOpenPopover?()
+            onClick?()
         }
     }
 
@@ -452,6 +475,7 @@ final class PetHostingView: NSHostingView<AnyView> {
 @MainActor
 struct FloatingPetView: View {
     var animated: Bool = true
+    var burst = PrayerBurst()
     @Environment(UsageStore.self) private var store
     @Environment(CompanionStore.self) private var companion
 
@@ -468,7 +492,19 @@ struct FloatingPetView: View {
             SpriteView(speciesID: subject.speciesID, size: size, animated: animated,
                        shiny: subject.isShiny,
                        minFrameDelay: store.animationQuality.frameFloor, form: subject.form)
+                // One-shot wobble per prayer; keyframes run once per trigger change, never in a loop.
+                .keyframeAnimator(initialValue: 0.0, trigger: burst.wobbleCount) { sprite, angle in
+                    sprite.rotationEffect(.degrees(angle))
+                } keyframes: { _ in
+                    KeyframeTrack {
+                        LinearKeyframe(-9.0, duration: 0.06)
+                        LinearKeyframe(9.0, duration: 0.10)
+                        LinearKeyframe(-5.0, duration: 0.08)
+                        LinearKeyframe(0.0, duration: 0.06)
+                    }
+                }
                 .frame(width: size, height: size)
+                .overlay { PrayerEmojiLayer(burst: burst, size: size, animated: animated) }
                 .zIndex(0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -477,13 +513,100 @@ struct FloatingPetView: View {
     }
 
     static func hoverTooltip(todayTokens: Int, limitUtilization: Double?,
-                             mode: UsageStore.LimitDisplayMode, l: L) -> String {
+                             mode: UsageStore.LimitDisplayMode, l: L, prayers: Int = 0) -> String {
         let usage = TokenFormatter.grouped(todayTokens)
+        let base: String
         if let pct = limitUtilization {
             let text = TokenFormatter.percent(UsageStore.displayPercent(pct, mode: mode))
-            return l.floatingPetHoverWithLimit(usage, mode == .remaining ? l.percentRemaining(text) : text)
+            base = l.floatingPetHoverWithLimit(usage, mode == .remaining ? l.percentRemaining(text) : text)
+        } else {
+            base = l.floatingPetHoverTokensOnly(usage)
         }
-        return l.floatingPetHoverTokensOnly(usage)
+        return prayers > 0 ? base + "\n" + l.prayerCount(prayers) : base
+    }
+}
+
+/// The 🙏 particles floating up from the egg. Each one removes itself after `lifetime`; no standing timer.
+/// Pure presentation state: it never touches an RNG that feeds a hatch roll.
+@MainActor @Observable
+final class PrayerBurst {
+    struct Particle: Identifiable, Equatable {
+        let id = UUID()
+        /// 0...1 across the usable width of the pet (the emoji's own width is already excluded).
+        let xFraction: Double
+    }
+
+    /// A little longer than the 1 s float-and-fade, so a particle is gone only once it is invisible.
+    static let lifetime: Duration = .milliseconds(1100)
+
+    private(set) var particles: [Particle] = []
+    /// Bumped on every prayer; the egg wobbles once per change.
+    private(set) var wobbleCount = 0
+
+    func spawn(xFraction: Double = .random(in: 0...1)) {
+        let particle = Particle(xFraction: min(max(xFraction, 0), 1))
+        particles.append(particle)
+        wobbleCount += 1
+        Task {
+            try? await Task.sleep(for: Self.lifetime)
+            particles.removeAll { $0.id == particle.id }
+        }
+    }
+}
+
+/// Draws the particles inside the pet's own frame, so the transparent panel never needs to grow.
+@MainActor
+struct PrayerEmojiLayer: View {
+    let burst: PrayerBurst
+    let size: CGFloat
+    let animated: Bool
+
+    /// Emoji edge for a pet size (clamped so it stays legible at 48 pt and modest at 384 pt).
+    static func emojiSize(petSize: CGFloat) -> CGFloat { min(max(petSize * 0.25, 14), 32) }
+
+    var body: some View {
+        let emojiSize = Self.emojiSize(petSize: size)
+        ZStack {
+            ForEach(burst.particles) { particle in
+                PrayerEmoji(xFraction: particle.xFraction, petSize: size, emojiSize: emojiSize)
+            }
+        }
+        .frame(width: size, height: size)
+        .allowsHitTesting(false)
+    }
+}
+
+/// One particle at a fixed point of its flight (`progress` 0 = just spawned, 1 = gone).
+@MainActor
+struct PrayerEmojiFrame: View {
+    let xFraction: Double
+    let petSize: CGFloat
+    let emojiSize: CGFloat
+    let progress: Double
+
+    var body: some View {
+        // Centre x keeps the glyph fully inside [0, petSize]; it rises from the lower middle to the top edge.
+        let x = emojiSize / 2 + CGFloat(xFraction) * (petSize - emojiSize)
+        let startY = petSize * 0.7
+        let endY = emojiSize / 2
+        Text("🙏")
+            .font(.system(size: emojiSize * 0.8))
+            .frame(width: emojiSize, height: emojiSize)
+            .position(x: x, y: startY + (endY - startY) * CGFloat(progress))
+            .opacity(1 - progress)
+    }
+}
+
+@MainActor
+private struct PrayerEmoji: View {
+    let xFraction: Double
+    let petSize: CGFloat
+    let emojiSize: CGFloat
+    @State private var progress = 0.0
+
+    var body: some View {
+        PrayerEmojiFrame(xFraction: xFraction, petSize: petSize, emojiSize: emojiSize, progress: progress)
+            .onAppear { withAnimation(.easeOut(duration: 1)) { progress = 1 } }
     }
 }
 

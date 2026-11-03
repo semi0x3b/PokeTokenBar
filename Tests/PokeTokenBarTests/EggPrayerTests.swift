@@ -214,4 +214,46 @@ final class EggPrayerTests: XCTestCase {
         XCTAssertEqual(L(.ko).prayerBornWith(37), "기도 37회로 태어남")
         XCTAssertEqual(L(.ko).prayerCount(3), "기도 3회")
     }
+
+    // MARK: floating pet click routing and particles
+
+    func testClickPraysOverAnEggAndOpensThePopoverForAPokemon() {
+        XCTAssertEqual(FloatingPetController.clickAction(subjectIsEgg: true), .pray)
+        XCTAssertEqual(FloatingPetController.clickAction(subjectIsEgg: false), .openPopover)
+    }
+
+    func testBurstSpawnsClampedParticlesAndRemovesThemItself() async throws {
+        let burst = PrayerBurst()
+        burst.spawn(xFraction: -3)
+        burst.spawn(xFraction: 7)
+        burst.spawn()
+        XCTAssertEqual(burst.particles.count, 3, "rapid clicks stack up")
+        XCTAssertEqual(burst.wobbleCount, 3)
+        XCTAssertEqual(burst.particles[0].xFraction, 0)
+        XCTAssertEqual(burst.particles[1].xFraction, 1)
+        XCTAssertTrue(burst.particles.allSatisfy { (0...1).contains($0.xFraction) })
+        try await Task.sleep(for: PrayerBurst.lifetime + .milliseconds(300))
+        XCTAssertTrue(burst.particles.isEmpty, "each particle removes itself")
+        XCTAssertEqual(burst.wobbleCount, 3)
+    }
+
+    func testEmojiStaysInsideThePetFrameAtEverySize() {
+        for petSize in stride(from: CGFloat(48), through: 384, by: 8) {
+            let emoji = PrayerEmojiLayer.emojiSize(petSize: petSize)
+            XCTAssertLessThanOrEqual(emoji, petSize)
+            for fraction in [0.0, 1.0] {
+                let centre = emoji / 2 + CGFloat(fraction) * (petSize - emoji)
+                XCTAssertGreaterThanOrEqual(centre - emoji / 2, 0)
+                XCTAssertLessThanOrEqual(centre + emoji / 2, petSize)
+            }
+        }
+    }
+
+    func testHoverTextShowsPrayersOnlyWhenThereAreSome() {
+        let l = L(.ko)
+        let plain = FloatingPetView.hoverTooltip(todayTokens: 1, limitUtilization: nil, mode: .used, l: l)
+        let prayed = FloatingPetView.hoverTooltip(todayTokens: 1, limitUtilization: nil, mode: .used, l: l, prayers: 3)
+        XCTAssertFalse(plain.contains("기도"))
+        XCTAssertEqual(prayed, plain + "\n기도 3회")
+    }
 }
