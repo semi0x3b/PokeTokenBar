@@ -19,7 +19,7 @@ final class SulkStateTests: XCTestCase {
     private func makeStore(expireHatchWindow: Bool = true) async -> CompanionStore {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("poke-sulk-\(UUID().uuidString).json")
         let line = EvoLine(baseID: 1, tree: EvoNode(speciesID: 1, children: []), rarity: .common, names: [:])
-        let store = CompanionStore(provider: StubProvider(value: line), clock: { clock.now },
+        let store = CompanionStore(provider: StubProvider(value: line), clock: { self.clock.now },
                                    fileURL: url, rng: SeededRNG(seed: 5))
         await store.hatch(baseID: 1)
         if expireHatchWindow { clock.now = sulkNow.addingTimeInterval(60) }
