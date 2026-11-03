@@ -183,4 +183,73 @@ final class SulkRenderTests: XCTestCase {
             XCTAssertNotEqual(images[false], images[true], "\(language): sulk must change the rendered pixels")
         }
     }
+
+    // MARK: Menu illustrations
+
+    /// One menu row: checkmark column, title, optional shortcut. Greyed when it is information only.
+    private struct MenuRow: Identifiable {
+        let id = UUID()
+        let title: String
+        var checked = false
+        var shortcut = ""
+        var enabled = true
+        var isSeparator = false
+    }
+
+    private func menuIllustration(_ rows: [MenuRow], width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+                if row.isSeparator {
+                    Divider().padding(.vertical, 4)
+                } else {
+                    HStack(spacing: 0) {
+                        Text(row.checked ? "✓" : "").frame(width: 20)
+                        Text(row.title)
+                        Spacer(minLength: 16)
+                        Text(row.shortcut).foregroundColor(.secondary)
+                    }
+                    .font(.system(size: 13))
+                    .foregroundColor(row.enabled ? .primary : .secondary)
+                    .frame(height: 22)
+                    .padding(.horizontal, 6)
+                }
+            }
+        }
+        .padding(6)
+        .frame(width: width)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .windowBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
+        .padding(12)
+    }
+
+    private func writeIllustration<V: View>(_ view: V, name: String, size: CGSize, to directory: URL) async throws {
+        let host = mount(view, width: size.width, height: size.height)
+        let png = try await snapshot(host)
+        try png.write(to: directory.appendingPathComponent(name))
+        print("wrote \(name) (\(png.count) bytes)")
+    }
+
+    /// Illustrations built from the real localized titles; the menus themselves are native NSMenus.
+    func testRenderMenuIllustrations() async throws {
+        let directory = try outputDirectory()
+        let l = L(.en)
+        for checked in [false, true] {
+            let rows = [MenuRow(title: l.floatingPetMenuOpen), MenuRow(title: l.floatingPetMenuHide),
+                        MenuRow(title: l.backViewLabel, checked: checked)]
+            try await writeIllustration(menuIllustration(rows, width: 220),
+                                        name: "illustration-pet-menu-\(checked ? "checked" : "unchecked")-en.png",
+                                        size: CGSize(width: 244, height: 120), to: directory)
+        }
+        let entries = StatusItemMenu.entries(l: l, todayTokens: 19_400_000, todayCost: nil,
+                                             floatingPetEnabled: false, alwaysFacesBack: true)
+        let rows = entries.map { entry -> MenuRow in
+            guard let entry else { return MenuRow(title: "", isSeparator: true) }
+            return MenuRow(title: entry.title, checked: entry.isChecked,
+                           shortcut: entry.keyEquivalent.isEmpty ? "" : "⌘" + entry.keyEquivalent.uppercased(),
+                           enabled: entry.action != nil)
+        }
+        try await writeIllustration(menuIllustration(rows, width: 280),
+                                    name: "illustration-status-menu-checked-en.png",
+                                    size: CGSize(width: 304, height: 240), to: directory)
+    }
 }
