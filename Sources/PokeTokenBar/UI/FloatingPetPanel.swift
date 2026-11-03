@@ -104,15 +104,21 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     static func clickAction(subjectIsEgg: Bool) -> ClickAction { subjectIsEgg ? .pray : .openPopover }
 
-    /// Praying refreshes usage at growing intervals: after 10 prayers, then 20 more, then 30 more... i.e. at the
-    /// cumulative counts 10, 30, 60, 100, 150 (step * k(k+1)/2), so the egg's progress moves without a request per click.
+    /// Praying refreshes usage at growing intervals: after 30 prayers, then 30 more, then 40 more, then 50 more...
+    /// i.e. at the cumulative counts 30, 60, 100, 150 (step * k(k+1)/2 without its first term, 10), so the egg's
+    /// progress moves without a request per click.
     static let prayerRefreshStep = 10
     /// Minimum gap between prayer-triggered refreshes. A refresh also queries the limit endpoints
     /// (Claude, Codex, Cursor, Antigravity), which have their own rate limits.
     static let prayerRefreshInterval: TimeInterval = 30
 
-    /// How many refresh milestones `count` prayers have passed: the largest k with step * k(k+1)/2 <= count.
+    /// How many refresh milestones `count` prayers have passed: the largest k with step * k(k+1)/2 <= count,
+    /// minus one because the first term (10 prayers) is skipped.
     static func prayerRefreshMilestone(for count: Int) -> Int {
+        max(0, triangularIndex(for: count) - 1)
+    }
+
+    private static func triangularIndex(for count: Int) -> Int {
         guard count >= prayerRefreshStep else { return 0 }
         let triangular = Double(count) / Double(prayerRefreshStep)
         var k = Int(((-1 + (1 + 8 * triangular).squareRoot()) / 2).rounded(.down))

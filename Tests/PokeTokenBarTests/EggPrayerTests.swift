@@ -314,7 +314,7 @@ final class EggPrayerTests: XCTestCase {
     }
 
     func testMilestonesGrowByTheStepEachTime() {
-        let milestones = [0: 0, 9: 0, 10: 1, 11: 1, 29: 1, 30: 2, 59: 2, 60: 3, 99: 3, 100: 4, 149: 4, 150: 5]
+        let milestones = [0: 0, 9: 0, 10: 0, 29: 0, 30: 1, 59: 1, 60: 2, 99: 2, 100: 3, 149: 3, 150: 4]
         for (count, milestone) in milestones {
             XCTAssertEqual(FloatingPetController.prayerRefreshMilestone(for: count), milestone, "\(count) prayers")
         }
@@ -327,24 +327,20 @@ final class EggPrayerTests: XCTestCase {
         let router = makeRouter(clock: { current }, log: log)
         let floor = FloatingPetController.prayerRefreshInterval
 
-        pray(9, on: router)
-        XCTAssertEqual(log.refreshes, 0, "9 prayers: no refresh")
-        pray(1, on: router)
-        XCTAssertEqual(log.refreshes, 1, "the 10th prayer refreshes")
-        current = now.addingTimeInterval(floor)
-        pray(19, on: router)
-        XCTAssertEqual(log.refreshes, 1, "11-29: no refresh")
-        pray(1, on: router)
-        XCTAssertEqual(log.refreshes, 2, "the 30th prayer refreshes")
-        current = now.addingTimeInterval(floor * 2)
         pray(29, on: router)
+        XCTAssertEqual(log.refreshes, 0, "29 prayers: no refresh")
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 1, "the 30th prayer refreshes")
+        current = now.addingTimeInterval(floor)
+        pray(29, on: router)
+        XCTAssertEqual(log.refreshes, 1, "59 prayers: no new refresh")
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 2, "the 60th prayer refreshes")
+        current = now.addingTimeInterval(floor * 2)
+        pray(39, on: router)
         XCTAssertEqual(log.refreshes, 2)
         pray(1, on: router)
-        XCTAssertEqual(log.refreshes, 3, "the 60th prayer refreshes")
-        current = now.addingTimeInterval(floor * 3)
-        pray(39, on: router)
-        pray(1, on: router)
-        XCTAssertEqual(log.refreshes, 4, "the 100th prayer refreshes")
+        XCTAssertEqual(log.refreshes, 3, "the 100th prayer refreshes")
         XCTAssertEqual(log.emojis, log.prays, "every click still spawns its emoji")
     }
 
@@ -352,11 +348,11 @@ final class EggPrayerTests: XCTestCase {
         var current = now
         let log = PrayerCallLog()
         let router = makeRouter(clock: { current }, log: log)
-        pray(10, on: router)
+        pray(30, on: router)
         XCTAssertEqual(log.refreshes, 1)
         current = now.addingTimeInterval(5)
-        pray(20, on: router)   // reaches 30 only 5 s after the last refresh
-        XCTAssertEqual(log.refreshes, 1, "the floor holds the 30th-prayer refresh back")
+        pray(30, on: router)   // reaches 60 only 5 s after the last refresh
+        XCTAssertEqual(log.refreshes, 1, "the floor holds the 60th-prayer refresh back")
         current = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval)
         pray(1, on: router)
         XCTAssertEqual(log.refreshes, 2, "the first click after the floor does not lose the milestone")
@@ -368,26 +364,26 @@ final class EggPrayerTests: XCTestCase {
         var current = now
         let log = PrayerCallLog()
         let router = makeRouter(clock: { current }, log: log)
-        pray(30, on: router)   // refreshes at 10; the 30th is held back by the floor
+        pray(60, on: router)   // refreshes at 30; the 60th is held back by the floor
         XCTAssertEqual(log.refreshes, 1)
         current = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval * 2)
         log.eggPrayers = 0     // a new egg: the persisted prayer count starts over
-        pray(9, on: router)
+        pray(29, on: router)
         XCTAssertEqual(log.refreshes, 1)
         pray(1, on: router)
-        XCTAssertEqual(log.refreshes, 2, "the new egg's 10th prayer refreshes again")
+        XCTAssertEqual(log.refreshes, 2, "the new egg's 30th prayer refreshes again")
     }
 
     func testClickingAHatchedPokemonOpensThePopoverWithoutPrayingOrRefreshing() {
         let log = PrayerCallLog()
         let router = makeRouter(clock: { self.now }, log: log)
-        pray(9, on: router)
+        pray(29, on: router)
         for _ in 0..<50 { router.handle(subjectIsEgg: false) }
         XCTAssertEqual(log.opens, 50)
-        XCTAssertEqual(log.prays, 9)
+        XCTAssertEqual(log.prays, 29)
         XCTAssertEqual(log.refreshes, 0, "hatched-Pokémon clicks never count")
         pray(1, on: router)
-        XCTAssertEqual(log.refreshes, 1, "the 10th real prayer still refreshes")
+        XCTAssertEqual(log.refreshes, 1, "the 30th real prayer still refreshes")
     }
 
     func testShouldRefreshOnPrayerDecision() {
@@ -396,12 +392,12 @@ final class EggPrayerTests: XCTestCase {
             FloatingPetController.shouldRefreshOnPrayer(count: count, lastRefreshedMilestone: last,
                                                         lastRefreshAt: at, now: moment)
         }
-        XCTAssertFalse(decide(9, last: 0, at: nil, now))
-        XCTAssertTrue(decide(10, last: 0, at: nil, now))
-        XCTAssertFalse(decide(10, last: 1, at: nil, now), "already refreshed at this milestone")
-        XCTAssertFalse(decide(10, last: 0, at: now, now), "inside the floor")
-        XCTAssertTrue(decide(10, last: 0, at: now, later))
-        XCTAssertTrue(decide(30, last: 1, at: now, later))
+        XCTAssertFalse(decide(29, last: 0, at: nil, now))
+        XCTAssertTrue(decide(30, last: 0, at: nil, now))
+        XCTAssertFalse(decide(30, last: 1, at: nil, now), "already refreshed at this milestone")
+        XCTAssertFalse(decide(30, last: 0, at: now, now), "inside the floor")
+        XCTAssertTrue(decide(30, last: 0, at: now, later))
+        XCTAssertTrue(decide(60, last: 1, at: now, later))
     }
 }
 
