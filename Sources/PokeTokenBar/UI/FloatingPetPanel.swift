@@ -84,18 +84,35 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     static func clickAction(subjectIsEgg: Bool) -> ClickAction { subjectIsEgg ? .pray : .openPopover }
 
-    private func handleClick() {
-        switch Self.clickAction(subjectIsEgg: companion.representativeSubject.speciesID == nil) {
-        case .pray:
-            companion.pray()
-            prayerBurst.spawn()
-        case .openPopover:
-            onOpenPopover?()
-        }
+    /// Minimum gap between usage refreshes triggered by praying. A refresh also queries the limit
+    /// endpoints (Claude, Codex, Cursor, Antigravity), which have their own rate limits.
+    static let prayerRefreshInterval: TimeInterval = 30
+
+    static func shouldRefreshOnPrayer(lastRefreshAt: Date?, now: Date) -> Bool {
+        guard let lastRefreshAt else { return true }
+        return now.timeIntervalSince(lastRefreshAt) >= prayerRefreshInterval
     }
 
+    private lazy var clickRouter = PetClickRouter(
+        pray: { [weak self] in self?.companion.pray() },
+        spawnEmoji: { [weak self] in self?.prayerBurst.spawn() },
+        refreshUsage: { [weak self] in
+            guard let store = self?.store else { return }
+            Task { await store.refresh() }
+        },
+        openPopover: { [weak self] in self?.onOpenPopover?() },
+        clock: clock)
+
+    private func handleClick() {
+        clickRouter.handle(subjectIsEgg: companion.representativeSubject.speciesID == nil)
+    }
+
+    private let clock: () -> Date
+
     init(store: UsageStore, companion: CompanionStore, defaults: UserDefaults = .standard,
+         clock: @escaping () -> Date = Date.init,
          onOpenPopover: (() -> Void)? = nil, onHide: (() -> Void)? = nil) {
+        self.clock = clock
         self.store = store
         self.companion = companion
         self.defaults = defaults
@@ -382,6 +399,42 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         defaults.set(Double(pet.x), forKey: Self.originXKey)
         defaults.set(Double(pet.y), forKey: Self.originYKey)
         if hoverPanel?.isVisible == true { showHoverCallout() }
+    }
+}
+
+/// Routes a plain click on the pet. Praying always counts and spawns its emoji at once;
+/// only the usage refresh it triggers is throttled.
+@MainActor
+final class PetClickRouter {
+    private let pray: () -> Void
+    private let spawnEmoji: () -> Void
+    private let refreshUsage: () -> Void
+    private let openPopover: () -> Void
+    private let clock: () -> Date
+    private var lastPrayerRefreshAt: Date?
+
+    init(pray: @escaping () -> Void, spawnEmoji: @escaping () -> Void, refreshUsage: @escaping () -> Void,
+         openPopover: @escaping () -> Void, clock: @escaping () -> Date) {
+        self.pray = pray
+        self.spawnEmoji = spawnEmoji
+        self.refreshUsage = refreshUsage
+        self.openPopover = openPopover
+        self.clock = clock
+    }
+
+    func handle(subjectIsEgg: Bool) {
+        switch FloatingPetController.clickAction(subjectIsEgg: subjectIsEgg) {
+        case .pray:
+            pray()
+            spawnEmoji()
+            let now = clock()
+            if FloatingPetController.shouldRefreshOnPrayer(lastRefreshAt: lastPrayerRefreshAt, now: now) {
+                lastPrayerRefreshAt = now
+                refreshUsage()
+            }
+        case .openPopover:
+            openPopover()
+        }
     }
 }
 

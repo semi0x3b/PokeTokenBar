@@ -256,4 +256,49 @@ final class EggPrayerTests: XCTestCase {
         XCTAssertFalse(plain.contains("기도"))
         XCTAssertEqual(prayed, plain + "\n기도 3회")
     }
+
+    // MARK: prayer-triggered usage refresh
+
+    private func makeRouter(clock: @escaping () -> Date, log: PrayerCallLog) -> PetClickRouter {
+        PetClickRouter(pray: { log.prays += 1 }, spawnEmoji: { log.emojis += 1 },
+                       refreshUsage: { log.refreshes += 1 }, openPopover: { log.opens += 1 }, clock: clock)
+    }
+
+    func testPrayerRefreshIsThrottledToOncePerInterval() {
+        var current = now
+        let log = PrayerCallLog()
+        let router = makeRouter(clock: { current }, log: log)
+
+        router.handle(subjectIsEgg: true)
+        XCTAssertEqual(log.refreshes, 1, "the first click refreshes")
+        current = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval - 1)
+        router.handle(subjectIsEgg: true)
+        router.handle(subjectIsEgg: true)
+        XCTAssertEqual(log.refreshes, 1, "clicks inside the interval do not refresh")
+        XCTAssertEqual(log.prays, 3, "every click still prays")
+        XCTAssertEqual(log.emojis, 3, "and spawns its emoji")
+        current = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval)
+        router.handle(subjectIsEgg: true)
+        XCTAssertEqual(log.refreshes, 2, "a click after the interval refreshes again")
+    }
+
+    func testClickingAHatchedPokemonOpensThePopoverWithoutPrayingOrRefreshing() {
+        let log = PrayerCallLog()
+        let router = makeRouter(clock: { self.now }, log: log)
+        router.handle(subjectIsEgg: false)
+        XCTAssertEqual(log.opens, 1)
+        XCTAssertEqual(log.prays + log.emojis + log.refreshes, 0)
+    }
+
+    func testShouldRefreshOnPrayerDecision() {
+        XCTAssertTrue(FloatingPetController.shouldRefreshOnPrayer(lastRefreshAt: nil, now: now))
+        XCTAssertFalse(FloatingPetController.shouldRefreshOnPrayer(lastRefreshAt: now, now: now))
+        XCTAssertTrue(FloatingPetController.shouldRefreshOnPrayer(
+            lastRefreshAt: now, now: now.addingTimeInterval(FloatingPetController.prayerRefreshInterval)))
+    }
+}
+
+@MainActor
+private final class PrayerCallLog {
+    var prays = 0, emojis = 0, refreshes = 0, opens = 0
 }
