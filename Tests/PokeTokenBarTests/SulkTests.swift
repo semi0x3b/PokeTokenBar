@@ -2,30 +2,11 @@ import AppKit
 import XCTest
 @testable import PokeTokenBar
 
-// "Neglected? It turns its back": sulk state, idle-day counting, and back-sprite URL/cache/fallback.
-// StubProvider / SeededRNG come from CompanionTests.swift.
+// "Neglected? It turns its back": sulk state after a day without token usage, its hover text, and
+// back-sprite URL/cache/fallback. StubProvider / SeededRNG come from CompanionTests.swift.
 
-private let utc = TimeZone(identifier: "UTC")!
 private let sulkNow = Date(timeIntervalSince1970: 1_700_000_000)
-
-private func utcCalendar() -> Calendar {
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = utc
-    return calendar
-}
-
-private func noon(_ year: Int, _ month: Int, _ day: Int) -> Date {
-    utcCalendar().date(from: DateComponents(year: year, month: month, day: day, hour: 12))!
-}
-
-private func dayKey(_ year: Int, _ month: Int, _ day: Int) -> String {
-    LocalUsageReader.localDayFormatter(timeZone: utc).string(from: noon(year, month, day))
-}
-
-private func day(_ date: String, _ tokens: Int) -> DailyUsage {
-    DailyUsage(date: date, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0,
-               cacheReadTokens: 0, totalTokens: tokens, totalCost: 0, costCoverage: .empty)
-}
+private let threshold = PokemonBalance.sulkAfterIdle
 
 private final class SulkClock: @unchecked Sendable {
     nonisolated(unsafe) var now = sulkNow
@@ -33,75 +14,78 @@ private final class SulkClock: @unchecked Sendable {
 
 @MainActor
 final class SulkStateTests: XCTestCase {
-    private func hatchedStore() async -> CompanionStore {
-        let clock = SulkClock()
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("poke-sulk-\(UUID().uuidString).json")
-        let node = EvoNode(speciesID: 1, children: [])
-        let line = EvoLine(baseID: 1, tree: node, rarity: .common, names: [:])
-        let store = CompanionStore(provider: StubProvider(value: line), clock: { clock.now },
-                                   fileURL: url, rng: SeededRNG(seed: 5))
-        await store.hatch(baseID: 1)
-        clock.now = sulkNow.addingTimeInterval(60)   // let the hatch event window expire
-        return store
-    }
-
-    private func update(_ store: CompanionStore, today: Int, idleDays: Int, hasData: Bool = true,
-                        limitWarning: Bool = false) {
-        store.update(todayTokensByProvider: ["test": today], todayDate: "d", monthTotal: 0, burnTier: .idle,
-                     limitWarning: limitWarning, hasUsageData: hasData, idleDaysBeforeToday: idleDays)
-    }
-
-    func testSulksWhenTodayAndYesterdayAreIdle() async {
-        let store = await hatchedStore()
-        update(store, today: 0, idleDays: 1)
-        XCTAssertEqual(store.displayState, .sulk)
-        XCTAssertTrue(store.facesBack)
-        XCTAssertEqual(store.sulkDays, 2)
-        update(store, today: 0, idleDays: 4)
-        XCTAssertEqual(store.sulkDays, 5)
-    }
-
-    func testUnknownYesterdayNeverSulks() async {
-        let store = await hatchedStore()
-        update(store, today: 0, idleDays: 0)   // 0 = yesterday unknown or active
-        XCTAssertEqual(store.displayState, .sleep)
-        XCTAssertFalse(store.facesBack)
-        XCTAssertEqual(store.sulkDays, 0)
-    }
-
-    func testNoUsageDataDoesNotSulk() async {
-        let store = await hatchedStore()
-        // The first update only fixes the install baseline, so run one with data before losing it.
-        update(store, today: 0, idleDays: 0)
-        update(store, today: 0, idleDays: 3, hasData: false)
-        XCTAssertEqual(store.displayState, .sleep)
-        XCTAssertFalse(store.facesBack)
-    }
-
-    func testTiredBeatsSulk() async {
-        let store = await hatchedStore()
-        update(store, today: 0, idleDays: 3, limitWarning: true)
-        XCTAssertEqual(store.displayState, .tired)
-    }
-
-    func testSulkBeatsSleepAndUsageEndsIt() async {
-        let store = await hatchedStore()
-        update(store, today: 0, idleDays: 2)
-        XCTAssertEqual(store.displayState, .sulk)
-        update(store, today: 500, idleDays: 2)
-        XCTAssertNotEqual(store.displayState, .sulk)
-        XCTAssertFalse(store.facesBack)
-        XCTAssertEqual(store.sulkDays, 0)
-    }
-
-    func testLevelUpBeatsSulk() async {
+    private func makeStore(expireHatchWindow: Bool = true) async -> CompanionStore {
         let clock = SulkClock()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("poke-sulk-\(UUID().uuidString).json")
         let line = EvoLine(baseID: 1, tree: EvoNode(speciesID: 1, children: []), rarity: .common, names: [:])
         let store = CompanionStore(provider: StubProvider(value: line), clock: { clock.now },
                                    fileURL: url, rng: SeededRNG(seed: 5))
-        await store.hatch(baseID: 1)   // the hatch event window is still open
-        update(store, today: 0, idleDays: 3)
+        await store.hatch(baseID: 1)
+        if expireHatchWindow { clock.now = sulkNow.addingTimeInterval(60) }
+        return store
+    }
+
+    private func update(_ store: CompanionStore, today: Int = 0, idle: TimeInterval?, hasData: Bool = true,
+                        limitWarning: Bool = false) {
+        store.update(todayTokensByProvider: ["test": today], todayDate: "d", monthTotal: 0, burnTier: .idle,
+                     limitWarning: limitWarning, hasUsageData: hasData, timeSinceLastUsage: idle)
+    }
+
+    func testThresholdBoundary() async {
+        let store = await makeStore()
+        update(store, idle: threshold - 1)
+        XCTAssertEqual(store.displayState, .sleep, "just under the threshold does not sulk")
+        XCTAssertFalse(store.facesBack)
+        update(store, idle: threshold)
+        XCTAssertEqual(store.displayState, .sulk, "exactly the threshold sulks")
+        XCTAssertTrue(store.facesBack)
+        XCTAssertEqual(store.sulkIdle, threshold)
+    }
+
+    func testThresholdIsTwentyFourHours() {
+        XCTAssertEqual(threshold, 24 * 3600)
+    }
+
+    func testUnknownLastUsageNeverSulks() async {
+        let store = await makeStore()
+        update(store, idle: nil)
+        XCTAssertEqual(store.displayState, .sleep)
+        XCTAssertFalse(store.facesBack)
+        XCTAssertEqual(store.sulkIdle, 0)
+    }
+
+    func testNoUsageDataDoesNotSulk() async {
+        let store = await makeStore()
+        // The first update only fixes the install baseline, so run one with data before losing it.
+        update(store, idle: 0)
+        update(store, idle: 3 * threshold, hasData: false)
+        XCTAssertEqual(store.displayState, .sleep)
+        XCTAssertFalse(store.facesBack)
+    }
+
+    func testTiredBeatsSulk() async {
+        let store = await makeStore()
+        update(store, idle: 3 * threshold, limitWarning: true)
+        XCTAssertEqual(store.displayState, .tired)
+    }
+
+    func testSulkBeatsSleepAndResumingFlipsBack() async {
+        let store = await makeStore()
+        update(store, idle: 2 * threshold)
+        XCTAssertEqual(store.displayState, .sulk)
+        // Usage resumes: today's tokens show up before the scan's last-usage time catches up.
+        update(store, today: 500, idle: 2 * threshold)
+        XCTAssertNotEqual(store.displayState, .sulk)
+        XCTAssertFalse(store.facesBack)
+        XCTAssertEqual(store.sulkIdle, 0)
+        // And once the scan catches up, the idle time is small again.
+        update(store, idle: 60)
+        XCTAssertEqual(store.displayState, .sleep)
+    }
+
+    func testLevelUpBeatsSulk() async {
+        let store = await makeStore(expireHatchWindow: false)   // the hatch event window is still open
+        update(store, idle: 3 * threshold)
         XCTAssertEqual(store.displayState, .levelUp)
     }
 
@@ -110,73 +94,23 @@ final class SulkStateTests: XCTestCase {
         let line = EvoLine(baseID: 1, tree: EvoNode(speciesID: 1, children: []), rarity: .common, names: [:])
         let store = CompanionStore(provider: StubProvider(value: line), clock: { sulkNow },
                                    fileURL: url, rng: SeededRNG(seed: 1))
-        update(store, today: 0, idleDays: 3)
+        update(store, idle: 3 * threshold)
         XCTAssertEqual(store.displayState, .egg)
     }
-}
 
-final class IdleDaysTests: XCTestCase {
-    private func makeLedger(_ series: [DailyUsage]) -> UsageLedger {
-        var ledger = UsageLedger()
-        ledger.merge(series)
-        return ledger
-    }
-
-    func testCountsConsecutiveIdleDaysBeforeToday() {
-        // Sep 1-9: used on the 5th, idle 6-9; today is the 10th.
-        let series = (1...9).map { day(dayKey(2026, 9, $0), $0 == 5 ? 100 : 0) }
-        XCTAssertEqual(makeLedger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 4)
-    }
-
-    func testYesterdayActiveMeansZero() {
-        let series = [day(dayKey(2026, 9, 8), 0), day(dayKey(2026, 9, 9), 50)]
-        XCTAssertEqual(makeLedger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 0)
-    }
-
-    func testCountStopsAtWhatTheLedgerCovers() {
-        // Coverage starts on the 8th: the 6th and 7th are unknown, not idle.
-        let series = [day(dayKey(2026, 9, 8), 0), day(dayKey(2026, 9, 9), 0)]
-        XCTAssertEqual(makeLedger(series).idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 2)
-    }
-
-    func testUncoveredYesterdayIsUnknown() {
-        XCTAssertEqual(UsageLedger().idleDays(before: noon(2026, 9, 10), calendar: utcCalendar()), 0)
-        // First day of a month, nothing from the previous month on record.
-        let series = [day(dayKey(2026, 10, 1), 0)]
-        XCTAssertEqual(makeLedger(series).idleDays(before: noon(2026, 10, 1), calendar: utcCalendar()), 0)
-    }
-
-    func testADayTheAppNeverScannedStopsTheCount() {
-        // September was last scanned on the 28th (the laptop slept through the 29th and 30th); October
-        // was scanned on the 1st and 2nd. Sep 29/30 sit inside `coveredSince` but nobody saw them.
-        var ledger = makeLedger((1...28).map { day(dayKey(2026, 9, $0), 0) })
-        ledger.merge([day(dayKey(2026, 10, 1), 0), day(dayKey(2026, 10, 2), 0)])
-        XCTAssertTrue(ledger.covers(dayKey(2026, 9, 30)))
-        XCTAssertFalse(ledger.wasScanned(dayKey(2026, 9, 30)))
-        XCTAssertEqual(ledger.idleDays(before: noon(2026, 10, 3), calendar: utcCalendar()), 2)
-        // Yesterday itself unscanned: unknown, not idle.
-        XCTAssertEqual(ledger.idleDays(before: noon(2026, 10, 1), calendar: utcCalendar()), 0)
-    }
-
-    func testScannedCoverageSurvivesSaveAndLoad() {
-        let suite = "SulkLedger-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let saved = makeLedger([day(dayKey(2026, 9, 28), 0), day(dayKey(2026, 9, 29), 0)])
-        saved.save(to: defaults)
-        let loaded = UsageLedger.load(from: defaults)
-        XCTAssertEqual(loaded, saved)
-        XCTAssertTrue(loaded.wasScanned(dayKey(2026, 9, 29)))
-        XCTAssertFalse(loaded.wasScanned(dayKey(2026, 9, 30)))
-    }
-
-    func testMonthBoundaryReachesIntoThePreviousMonth() {
-        var ledger = makeLedger([day(dayKey(2026, 9, 29), 0), day(dayKey(2026, 9, 30), 0)])
-        ledger.merge([day(dayKey(2026, 10, 1), 0), day(dayKey(2026, 10, 2), 0)])
-        XCTAssertEqual(ledger.idleDays(before: noon(2026, 10, 3), calendar: utcCalendar()), 4)
-        // Used on the last day of September: yesterday on Oct 1 is active.
-        let active = makeLedger([day(dayKey(2026, 9, 30), 70)])
-        XCTAssertEqual(active.idleDays(before: noon(2026, 10, 1), calendar: utcCalendar()), 0)
+    func testHoverTextShowsHoursBelowFortyEightAndDaysFromThere() {
+        let l = L(.en)
+        func tooltip(_ hours: Double) -> String {
+            FloatingPetView.hoverTooltip(todayTokens: 0, limitUtilization: nil, mode: .used, l: l,
+                                         sulkIdle: hours * 3600)
+        }
+        XCTAssertEqual(tooltip(0), l.floatingPetHoverTokensOnly("0"))
+        XCTAssertTrue(tooltip(24).hasSuffix(l.floatingPetHoverSulkHours(24)))
+        XCTAssertTrue(tooltip(47.9).hasSuffix(l.floatingPetHoverSulkHours(47)))
+        XCTAssertTrue(tooltip(48).hasSuffix(l.floatingPetHoverSulkDays(2)))
+        XCTAssertTrue(tooltip(100).hasSuffix(l.floatingPetHoverSulkDays(4)))
+        XCTAssertEqual(L(.ko).floatingPetHoverSulkHours(30), "30시간째 삐져 있어요")
+        XCTAssertEqual(L(.ko).floatingPetHoverSulkDays(3), "3일째 삐져 있어요")
     }
 }
 

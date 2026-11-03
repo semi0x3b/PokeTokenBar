@@ -1,7 +1,7 @@
 import Foundation
 
 /// 표시 상태 — 사용량/burn 으로 결정(스프라이트 모션 강도·상태 문구).
-/// `sulk`: no usage yesterday or today — the companion turns its back (see `CompanionStore.computeState`).
+/// `sulk`: no token usage for `PokemonBalance.sulkAfterIdle` — the companion turns its back.
 enum CompanionStateKind: String, Sendable {
     case egg, idle, working, focus, tired, sleep, sulk, levelUp
 }
@@ -105,6 +105,8 @@ enum Rarity: String, Codable, Sendable {
 /// 졸업 총량 T 는 같은 희귀도면 진화 단계 수와 무관하게 동일.
 /// 형태 k개 라인에서 i번째 형태 성장 비용 = T·i / (k(k+1)/2) → 합 = T, 단계↑일수록 비용↑.
 enum PokemonBalance {
+    /// With no token usage for this long the companion turns its back (`CompanionStateKind.sulk`).
+    static let sulkAfterIdle: TimeInterval = 24 * 3600
     /// 알 부화 임계 — 이만큼 토큰을 써야 알이 깨진다(즉시 부화 대신 기대감). 초과분은 부화체 성장에 이월.
     static let eggHatchThreshold = 5_000_000
     static let repeatGrowthMultiplier = 2

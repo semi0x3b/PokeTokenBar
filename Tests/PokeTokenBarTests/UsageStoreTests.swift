@@ -1089,6 +1089,36 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertTrue(store.snapshots.contains { $0.providerID == "codex" })
     }
 
+    /// Sulk input: unknown before this session's scan, the newest `lastUsage` across providers afterwards,
+    /// unknown again when a scan fails, and "at least the scan window" when a complete scan found nothing.
+    func testTimeSinceLastUsageIsUnknownUntilACompleteScan() async throws {
+        let now = Date()
+        let older = FakeUsageProvider(id: "codex", displayName: "Codex", daily: todayDaily(1))
+        let newer = FakeUsageProvider(id: "claude_code", displayName: "Claude Code", daily: todayDaily(1))
+        func enrichment(lastUsage: Date?, periodsOK: Bool = true) -> ProviderEnrichment {
+            ProviderEnrichment(activeBlock: nil, blocksOK: true,
+                               weekTotal: PeriodUsage(period: "w", totalTokens: 1, totalCost: 0),
+                               monthTotal: PeriodUsage(period: "m", totalTokens: 1, totalCost: 0),
+                               monthDaily: [todayDaily(1)], periodsOK: periodsOK, lastUsage: lastUsage)
+        }
+        older.enrichment = enrichment(lastUsage: now.addingTimeInterval(-50 * 3600))
+        newer.enrichment = enrichment(lastUsage: now.addingTimeInterval(-30 * 3600))
+        let store = makeStore(providers: [older, newer])
+        XCTAssertNil(store.timeSinceLastUsage(now: now), "nothing scanned yet: unknown, never idle")
+
+        await store.refresh(scheduleEmptyRetry: false)
+        XCTAssertEqual(try XCTUnwrap(store.timeSinceLastUsage(now: now)), 30 * 3600, accuracy: 1)
+
+        newer.enrichment = enrichment(lastUsage: nil, periodsOK: false)
+        await store.refresh(scheduleEmptyRetry: false)
+        XCTAssertNil(store.timeSinceLastUsage(now: now), "a failed scan may hide newer usage")
+
+        older.enrichment = enrichment(lastUsage: nil)
+        newer.enrichment = enrichment(lastUsage: nil)
+        await store.refresh(scheduleEmptyRetry: false)
+        XCTAssertEqual(store.timeSinceLastUsage(now: now), LocalUsageReader.recentUseWindow)
+    }
+
     func testNoCarrierForProviderIdleBeyondRecentWindow() async {
         let codex = FakeUsageProvider(id: "codex", displayName: "Codex", daily: nil)
         codex.enrichment = ProviderEnrichment(

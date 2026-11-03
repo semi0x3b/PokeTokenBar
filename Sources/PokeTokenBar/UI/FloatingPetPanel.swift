@@ -110,7 +110,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             _ = store.highestLimitUtilization
             _ = store.limitDisplayMode   // hover 툴팁 %가 파생되는 값 — 수동 관찰 표면은 파생 원천을 직접 추적(defect-log §표시·UI)
             _ = companion.language
-            _ = companion.sulkDays   // hover tooltip suffix
+            _ = companion.sulkIdle   // hover tooltip suffix
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -252,7 +252,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             limitUtilization: store.highestLimitUtilization,
             mode: store.limitDisplayMode,
             l: L(companion.language),
-            sulkDays: companion.sulkDays)
+            sulkIdle: companion.sulkIdle)
     }
 
     private func showHoverCallout() {
@@ -481,16 +481,20 @@ struct FloatingPetView: View {
                    value: store.currentBubbleAlert)
     }
 
-    /// `sulkDays` > 0 appends how long the companion has been sulking.
+    /// `sulkIdle` > 0 appends how long the companion has been sulking: hours below 48 h, days from there.
     static func hoverTooltip(todayTokens: Int, limitUtilization: Double?,
-                             mode: UsageStore.LimitDisplayMode, l: L, sulkDays: Int = 0) -> String {
+                             mode: UsageStore.LimitDisplayMode, l: L,
+                             sulkIdle: TimeInterval = 0) -> String {
         let usage = TokenFormatter.grouped(todayTokens)
         var text = l.floatingPetHoverTokensOnly(usage)
         if let pct = limitUtilization {
             let percent = TokenFormatter.percent(UsageStore.displayPercent(pct, mode: mode))
             text = l.floatingPetHoverWithLimit(usage, mode == .remaining ? l.percentRemaining(percent) : percent)
         }
-        return sulkDays > 0 ? text + " · " + l.floatingPetHoverSulk(sulkDays) : text
+        guard sulkIdle > 0 else { return text }
+        let hours = Int(sulkIdle / 3600)
+        let duration = hours < 48 ? l.floatingPetHoverSulkHours(hours) : l.floatingPetHoverSulkDays(hours / 24)
+        return text + " · " + duration
     }
 }
 

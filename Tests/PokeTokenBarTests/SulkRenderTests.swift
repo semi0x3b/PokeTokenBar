@@ -90,7 +90,8 @@ final class SulkRenderTests: XCTestCase {
         await store.hatch(baseID: Self.speciesID)
         clock.now = clock.now.addingTimeInterval(60)   // let the hatch event window expire
         store.update(todayTokensByProvider: ["test": 0], todayDate: "d", monthTotal: 0, burnTier: .idle,
-                     limitWarning: false, hasUsageData: true, idleDaysBeforeToday: sulking ? 3 : 0)
+                     limitWarning: false, hasUsageData: true,
+                     timeSinceLastUsage: sulking ? 3 * 86_400 : 3_600)
         XCTAssertEqual(store.displayState, sulking ? .sulk : .sleep)
         return store
     }
@@ -162,7 +163,7 @@ final class SulkRenderTests: XCTestCase {
                 // The same text the hover callout shows; the chrome here only approximates the NSPanel's.
                 let hover = FloatingPetView.hoverTooltip(
                     todayTokens: 0, limitUtilization: nil, mode: usage.limitDisplayMode,
-                    l: L(language), sulkDays: companion.sulkDays)
+                    l: L(language), sulkIdle: companion.sulkIdle)
                 let view = VStack(spacing: 8) {
                     Text(hover).font(.system(size: 11))
                         .padding(8)

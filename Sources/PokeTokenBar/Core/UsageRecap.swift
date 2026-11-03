@@ -9,42 +9,15 @@ import Foundation
 struct UsageLedger: Equatable, Sendable {
     static let defaultsKey = "dailyTokenLedger"
     static let coverageKey = "dailyTokenLedgerSince"
-    static let scannedKey = "dailyTokenLedgerScanned"
 
     private(set) var tokensByDay: [String: Int] = [:]
     /// The first day the ledger vouches for. From there on a missing row means "no usage"; before it
     /// the app was not recording, which a recap must not present as a quiet stretch.
     private(set) var coveredSince: String?
 
-    /// Per month (`yyyy-MM`), the latest day a scan actually listed. `coveredSince` only says where
-    /// recording began; a day the app was closed for (after the last scan of its month) sits inside
-    /// that span without ever having been scanned, so its missing row is not "no usage".
-    private(set) var scannedThrough: [String: String] = [:]
-
     func tokens(on day: String) -> Int { tokensByDay[day] ?? 0 }
 
-    /// A scan listed this day, so a missing row really means no usage. Stricter than `covers`.
-    func wasScanned(_ day: String) -> Bool {
-        guard let through = scannedThrough[String(day.prefix(7))] else { return false }
-        return day <= through
-    }
-
     func covers(_ day: String) -> Bool { coveredSince.map { day >= $0 } ?? false }
-
-    /// Consecutive idle days directly before `date`, counting back until a day with tokens or a day the
-    /// ledger did not actually scan. An unscanned day is unknown, never idle, so the count stops there.
-    func idleDays(before date: Date, calendar: Calendar = RecapPeriod.calendar()) -> Int {
-        let formatter = LocalUsageReader.localDayFormatter(timeZone: calendar.timeZone)
-        var count = 0
-        var cursor = date
-        while let previous = calendar.date(byAdding: .day, value: -1, to: cursor) {
-            let key = formatter.string(from: previous)
-            guard covers(key), wasScanned(key), tokens(on: key) == 0 else { break }
-            count += 1
-            cursor = previous
-        }
-        return count
-    }
 
     /// Records a refresh. A day never goes down: a rotated or pruned log makes the provider report
     /// less than it did yesterday, and the recap would lose days that really happened. Today keeps
@@ -52,10 +25,6 @@ struct UsageLedger: Equatable, Sendable {
     mutating func merge(_ series: [DailyUsage]) {
         for day in series where day.totalTokens > 0 {
             tokensByDay[day.date] = max(tokensByDay[day.date] ?? 0, day.totalTokens)
-        }
-        for day in series {
-            let month = String(day.date.prefix(7))
-            scannedThrough[month] = max(scannedThrough[month] ?? "", day.date)
         }
         // The series lists every day since the 1st, empty ones included, so the whole stretch was
         // scanned: that is what makes a zero a real zero.
@@ -68,7 +37,6 @@ struct UsageLedger: Equatable, Sendable {
     /// lexicographically the same way it sorts chronologically.
     mutating func prune(before cutoff: String) {
         tokensByDay = tokensByDay.filter { $0.key >= cutoff }
-        scannedThrough = scannedThrough.filter { $0.value >= cutoff }
         // The dropped days are unknown again, not empty.
         if let since = coveredSince, since < cutoff { coveredSince = cutoff }
     }
@@ -84,16 +52,12 @@ struct UsageLedger: Equatable, Sendable {
         if let since = defaults.string(forKey: coverageKey), formatter.date(from: since) != nil {
             ledger.coveredSince = since
         }
-        if let stored = defaults.dictionary(forKey: scannedKey) as? [String: String] {
-            ledger.scannedThrough = stored.filter { formatter.date(from: $0.value) != nil && $0.key == String($0.value.prefix(7)) }
-        }
         return ledger
     }
 
     func save(to defaults: UserDefaults) {
         defaults.set(tokensByDay, forKey: Self.defaultsKey)
         defaults.set(coveredSince, forKey: Self.coverageKey)
-        defaults.set(scannedThrough, forKey: Self.scannedKey)
     }
 }
 

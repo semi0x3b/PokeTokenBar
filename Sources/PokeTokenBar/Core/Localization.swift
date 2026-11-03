@@ -376,8 +376,12 @@ struct L {
     func floatingPetHoverTokensOnly(_ tokens: String) -> String {
         t("오늘 \(tokens) 토큰", "Today: \(tokens) tokens", "今日: \(tokens) トークン", "Hoy: \(tokens) tokens", "Aujourd'hui : \(tokens) tokens", "Hoje: \(tokens) tokens", "Heute: \(tokens) Tokens", "Токенов сегодня: \(tokens)")
     }
-    /// `days` is at least 2 (the first idle day is plain sleep).
-    func floatingPetHoverSulk(_ days: Int) -> String {
+    /// Sulking for `hours` (24...47) — below that the companion is not sulking yet.
+    func floatingPetHoverSulkHours(_ hours: Int) -> String {
+        t("\(hours)시간째 삐져 있어요", "Sulking for \(hours) hours", "\(hours)時間ずっと拗ねています", "Enfurruñado desde hace \(hours) horas", "Boude depuis \(hours) heures", "Emburrado há \(hours) horas", "Schmollt seit \(hours) Stunden", "Обижен уже \(hours) ч.")
+    }
+    /// Sulking for `days` (2 or more).
+    func floatingPetHoverSulkDays(_ days: Int) -> String {
         t("\(days)일째 삐져 있어요", "Sulking for \(days) days", "\(days)日連続で拗ねています", "Enfurruñado desde hace \(days) días", "Boude depuis \(days) jours", "Emburrado há \(days) dias", "Schmollt seit \(days) Tagen", "Обижен уже \(days) дн.")
     }
     func floatingPetHoverWithLimit(_ tokens: String, _ percent: String) -> String {
