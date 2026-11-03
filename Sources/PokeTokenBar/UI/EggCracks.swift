@@ -56,6 +56,7 @@ enum EggCracks {
 }
 
 /// Paints the crack cells without antialiasing so they line up with the sprite's pixels.
+@MainActor
 struct EggCrackOverlay: View {
     let stage: Int
 
