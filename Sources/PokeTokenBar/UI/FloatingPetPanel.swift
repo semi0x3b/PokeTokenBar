@@ -36,6 +36,22 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     /// headroom-only guard stays green for 3-line copy that still fits 70pt (#167).
     static let bubbleBodyLineLimit = 2
 
+    /// How long the heart bubble stays after the last qualifying stroke.
+    static let heartDuration: Duration = .milliseconds(1800)
+
+    /// Whether the heart bubble shows after a stroke. A limit alert always wins: no hearts over it.
+    static func heartsShowing(afterStrokeWithAlertActive alertActive: Bool) -> Bool { !alertActive }
+
+    /// The panel needs bubble headroom for a limit alert or for the heart bubble.
+    static func isShowingBubble(alertActive: Bool, heartsShowing: Bool) -> Bool {
+        alertActive || heartsShowing
+    }
+
+    /// The native tooltip would overlap a bubble, so it is cleared while one shows.
+    static func nativeToolTip(_ text: String, bubbleShowing: Bool) -> String? {
+        bubbleShowing ? nil : text
+    }
+
     /// Chrome size plus the signals the view actually fails on: wrap count vs
     /// `bubbleBodyLineLimit`, and single-line width vs the content column.
     struct SpeechBubbleLayout: Equatable {
@@ -76,26 +92,64 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     private var onOpenPopover: (() -> Void)?
     private var onHide: (() -> Void)?
-    /// Owned here and handed to the view once, so a prayer or a stroke never rebuilds the hosting `rootView`.
-    private let emojiBurst = EmojiBurst()
+    /// Owned here and handed to the view once, so a prayer never rebuilds the hosting `rootView`.
+    private let prayerBurst = PrayerBurst()
+    private let hearts = PetHeartState()
+    private var heartExpiry: Task<Void, Never>?
+    private var isHovering = false
 
     /// What a click on the pet does: an egg is prayed over, a hatched Pokémon opens the popover.
     enum ClickAction: Equatable { case pray, openPopover }
 
     static func clickAction(subjectIsEgg: Bool) -> ClickAction { subjectIsEgg ? .pray : .openPopover }
 
-    private func handleClick() {
-        switch Self.clickAction(subjectIsEgg: companion.representativeSubject.speciesID == nil) {
-        case .pray:
-            companion.pray()
-            emojiBurst.spawn("🙏", wobbles: true)
-        case .openPopover:
-            onOpenPopover?()
-        }
+    /// Praying refreshes usage at growing intervals: after 10 prayers, then 20 more, then 30 more... i.e. at the
+    /// cumulative counts 10, 30, 60, 100, 150 (step * k(k+1)/2), so the egg's progress moves without a request per click.
+    static let prayerRefreshStep = 10
+    /// Minimum gap between prayer-triggered refreshes. A refresh also queries the limit endpoints
+    /// (Claude, Codex, Cursor, Antigravity), which have their own rate limits.
+    static let prayerRefreshInterval: TimeInterval = 30
+
+    /// How many refresh milestones `count` prayers have passed: the largest k with step * k(k+1)/2 <= count.
+    static func prayerRefreshMilestone(for count: Int) -> Int {
+        guard count >= prayerRefreshStep else { return 0 }
+        let triangular = Double(count) / Double(prayerRefreshStep)
+        var k = Int(((-1 + (1 + 8 * triangular).squareRoot()) / 2).rounded(.down))
+        // Correct the float estimate at the exact boundaries.
+        while prayerRefreshStep * (k + 1) * (k + 2) / 2 <= count { k += 1 }
+        while k > 0 && prayerRefreshStep * k * (k + 1) / 2 > count { k -= 1 }
+        return k
     }
 
+    /// Refresh once a milestone is passed that was not refreshed yet AND the floor since the last refresh has passed.
+    /// A milestone held back by the floor is not lost: the next click after the floor still sees it as new.
+    static func shouldRefreshOnPrayer(count: Int, lastRefreshedMilestone: Int, lastRefreshAt: Date?, now: Date) -> Bool {
+        guard prayerRefreshMilestone(for: count) > lastRefreshedMilestone else { return false }
+        guard let lastRefreshAt else { return true }
+        return now.timeIntervalSince(lastRefreshAt) >= prayerRefreshInterval
+    }
+
+    private lazy var clickRouter = PetClickRouter(
+        pray: { [weak self] in self?.companion.pray() },
+        prayerCount: { [weak self] in self?.companion.state.eggPrayers?.count ?? 0 },
+        spawnEmoji: { [weak self] in self?.prayerBurst.spawn() },
+        refreshUsage: { [weak self] in
+            guard let store = self?.store else { return }
+            Task { await store.refresh() }
+        },
+        openPopover: { [weak self] in self?.onOpenPopover?() },
+        clock: clock)
+
+    private func handleClick() {
+        clickRouter.handle(subjectIsEgg: companion.representativeSubject.speciesID == nil)
+    }
+
+    private let clock: () -> Date
+
     init(store: UsageStore, companion: CompanionStore, defaults: UserDefaults = .standard,
+         clock: @escaping () -> Date = Date.init,
          onOpenPopover: (() -> Void)? = nil, onHide: (() -> Void)? = nil) {
+        self.clock = clock
         self.store = store
         self.companion = companion
         self.defaults = defaults
@@ -230,36 +284,59 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         show()
     }
 
+    private var showingBubble: Bool {
+        Self.isShowingBubble(alertActive: store.currentBubbleAlert != nil, heartsShowing: hearts.isShowing)
+    }
+
     private func show() {
         let p = panel ?? makePanel()
         panel = p
         let wantAnimated = Self.shouldAnimate(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if p.contentView == nil || builtAnimated != wantAnimated {
             let hosting = PetHostingView(rootView: AnyView(
-                FloatingPetView(animated: wantAnimated, burst: emojiBurst).environment(store).environment(companion)))
+                FloatingPetView(animated: wantAnimated, burst: prayerBurst, hearts: hearts).environment(store).environment(companion)))
             hosting.onOpenPopover = onOpenPopover
             hosting.onClick = { [weak self] in self?.handleClick() }
-            hosting.onStroke = { [weak self] in self?.emojiBurst.spawn("❤️") }
+            hosting.onStroke = { [weak self] in self?.petWasStroked() }
             hosting.onHide = onHide
             hosting.languageProvider = { [weak self] in self?.companion.language ?? .systemDefault }
             hosting.onHoverChange = { [weak self] hovering in
+                self?.isHovering = hovering
                 if hovering { self?.showHoverCallout() } else { self?.hideHoverCallout() }
             }
             p.contentView = hosting
             builtAnimated = wantAnimated
         }
         if let hosting = p.contentView as? PetHostingView {
-            hosting.toolTip = currentHoverText()
+            hosting.toolTip = Self.nativeToolTip(currentHoverText(), bubbleShowing: showingBubble)
             hosting.strokeDistance = max(10, CGFloat(store.floatingPetSize) * 0.15)
         }
         let petSize = CGFloat(store.floatingPetSize)
-        p.setFrame(targetFrame(petSize: petSize, showingBubble: store.currentBubbleAlert != nil),
+        p.setFrame(targetFrame(petSize: petSize, showingBubble: showingBubble),
                    display: true)
         p.orderFrontRegardless()
         if hoverPanel?.isVisible == true { showHoverCallout() }
     }
 
+    private func petWasStroked() {
+        hearts.isShowing = Self.heartsShowing(afterStrokeWithAlertActive: store.currentBubbleAlert != nil)
+        guard hearts.isShowing else { return }
+        hideHoverCallout()
+        sync()
+        // One-shot expiry, restarted by every stroke; no standing timer.
+        heartExpiry?.cancel()
+        heartExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.heartDuration)
+            guard !Task.isCancelled, let self else { return }
+            self.hearts.isShowing = false
+            self.sync()
+            if self.isHovering { self.showHoverCallout() }
+        }
+    }
+
     private func hide() {
+        heartExpiry?.cancel()
+        hearts.isShowing = false
         hideHoverCallout()
         guard let p = panel else { return }
         p.orderOut(nil)
@@ -279,7 +356,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private func showHoverCallout() {
         guard let pet = panel, pet.isVisible else { return }
         // Don't cover an active limit bubble — the speech bubble is the priority surface.
-        if store.currentBubbleAlert != nil { hideHoverCallout(); return }
+        if showingBubble { hideHoverCallout(); return }
         let text = currentHoverText()
         let appearance = NSApp.effectiveAppearance
         let colors = Self.hoverCalloutColors(for: appearance)
@@ -379,11 +456,56 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard let p = panel, p.isVisible else { return }
         let petSize = CGFloat(store.floatingPetSize)
-        let size = Self.panelSize(petSize: petSize, showingBubble: store.currentBubbleAlert != nil)
+        let size = Self.panelSize(petSize: petSize, showingBubble: showingBubble)
         let pet = Self.petOrigin(panelOrigin: p.frame.origin, petSize: petSize, panelSize: size)
         defaults.set(Double(pet.x), forKey: Self.originXKey)
         defaults.set(Double(pet.y), forKey: Self.originYKey)
         if hoverPanel?.isVisible == true { showHoverCallout() }
+    }
+}
+
+/// Routes a plain click on the pet. Praying always counts and spawns its emoji at once;
+/// only the usage refresh it triggers is throttled (at growing prayer milestones, at most once per interval).
+@MainActor
+final class PetClickRouter {
+    private let pray: () -> Void
+    private let prayerCount: () -> Int
+    private let spawnEmoji: () -> Void
+    private let refreshUsage: () -> Void
+    private let openPopover: () -> Void
+    private let clock: () -> Date
+    private var lastPrayerRefreshAt: Date?
+    /// In memory only: after a restart the first click past a milestone may refresh once more, which is harmless.
+    private var lastRefreshedMilestone = 0
+
+    init(pray: @escaping () -> Void, prayerCount: @escaping () -> Int, spawnEmoji: @escaping () -> Void, refreshUsage: @escaping () -> Void,
+         openPopover: @escaping () -> Void, clock: @escaping () -> Date) {
+        self.pray = pray
+        self.prayerCount = prayerCount
+        self.spawnEmoji = spawnEmoji
+        self.refreshUsage = refreshUsage
+        self.openPopover = openPopover
+        self.clock = clock
+    }
+
+    func handle(subjectIsEgg: Bool) {
+        switch FloatingPetController.clickAction(subjectIsEgg: subjectIsEgg) {
+        case .pray:
+            pray()
+            spawnEmoji()
+            let count = prayerCount()
+            let milestone = FloatingPetController.prayerRefreshMilestone(for: count)
+            if milestone < lastRefreshedMilestone { lastRefreshedMilestone = milestone }   // a new egg started over
+            let now = clock()
+            if FloatingPetController.shouldRefreshOnPrayer(count: count, lastRefreshedMilestone: lastRefreshedMilestone,
+                                                           lastRefreshAt: lastPrayerRefreshAt, now: now) {
+                lastRefreshedMilestone = milestone
+                lastPrayerRefreshAt = now
+                refreshUsage()
+            }
+        case .openPopover:
+            openPopover()
+        }
     }
 }
 
@@ -428,7 +550,8 @@ final class PetHostingView: NSHostingView<AnyView> {
 
     /// Tracking-area `mouseMoved` only arrives with no button pressed, so drags never count as strokes.
     override func mouseMoved(with event: NSEvent) {
-        // Screen coordinates, so a change of the view's own frame can never fake or break a stroke.
+        // Screen coordinates: the panel widens and re-centres when the bubble appears, which would
+        // shift view-local x mid-gesture and fake or break a stroke.
         if petting.feed(x: NSEvent.mouseLocation.x, at: event.timestamp, minStroke: strokeDistance) {
             onStroke?()
         }
@@ -494,7 +617,9 @@ final class PetHostingView: NSHostingView<AnyView> {
 @MainActor
 struct FloatingPetView: View {
     var animated: Bool = true
-    var burst = EmojiBurst()
+    var burst = PrayerBurst()
+    /// Heart bubble shown after a stroke. A limit alert takes precedence.
+    var hearts = PetHeartState()
     @Environment(UsageStore.self) private var store
     @Environment(CompanionStore.self) private var companion
 
@@ -506,12 +631,20 @@ struct FloatingPetView: View {
                 SpeechBubbleView(alert: alert, l: L(companion.language))
                     .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
                     .zIndex(1)
+            } else if hearts.isShowing {
+                HeartBubbleView(l: L(companion.language))
+                    .transition(.scale(scale: 0.8, anchor: .bottom).combined(with: .opacity))
+                    .zIndex(1)
             }
 
             SpriteView(speciesID: subject.speciesID, size: size, animated: animated,
                        shiny: subject.isShiny,
-                       minFrameDelay: store.animationQuality.frameFloor, form: subject.form)
-                // One-shot wobble per prayer (hearts do not wobble); keyframes run once per trigger change, never in a loop.
+                       minFrameDelay: store.animationQuality.frameFloor, form: subject.form,
+                       eggCrackStage: companion.eggCrackStage)
+                .onChange(of: companion.eggCrackStage) { old, new in
+                    if new > old { burst.wobble() }
+                }
+                // One-shot wobble per prayer; keyframes run once per trigger change, never in a loop.
                 .keyframeAnimator(initialValue: 0.0, trigger: burst.wobbleCount) { sprite, angle in
                     sprite.rotationEffect(.degrees(angle))
                 } keyframes: { _ in
@@ -523,12 +656,14 @@ struct FloatingPetView: View {
                     }
                 }
                 .frame(width: size, height: size)
-                .overlay { EmojiParticleLayer(burst: burst, size: size, animated: animated) }
+                .overlay { PrayerEmojiLayer(burst: burst, size: size, animated: animated) }
                 .zIndex(0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .animation(animated ? .spring(response: 0.3, dampingFraction: 0.7) : nil,
                    value: store.currentBubbleAlert)
+        .animation(animated ? .spring(response: 0.3, dampingFraction: 0.7) : nil,
+                   value: hearts.isShowing)
     }
 
     static func hoverTooltip(todayTokens: Int, limitUtilization: Double?,
@@ -541,18 +676,16 @@ struct FloatingPetView: View {
         } else {
             base = l.floatingPetHoverTokensOnly(usage)
         }
-        return prayers > 0 ? base + "\n" + l.prayerCount(prayers) : base
+        return prayers > 0 ? base + "\n" + l.prayerHoverLine(prayers) : base
     }
 }
 
-/// Emoji particles floating up from the pet: 🙏 over an egg, ❤️ when the pet is stroked.
-/// Each one removes itself after `lifetime`; no standing timer.
+/// The 🙏 particles floating up from the egg. Each one removes itself after `lifetime`; no standing timer.
 /// Pure presentation state: it never touches an RNG that feeds a hatch roll.
 @MainActor @Observable
-final class EmojiBurst {
+final class PrayerBurst {
     struct Particle: Identifiable, Equatable {
         let id = UUID()
-        let emoji: String
         /// 0...1 across the usable width of the pet (the emoji's own width is already excluded).
         let xFraction: Double
     }
@@ -561,13 +694,16 @@ final class EmojiBurst {
     static let lifetime: Duration = .milliseconds(1100)
 
     private(set) var particles: [Particle] = []
-    /// Bumped by every particle spawned with `wobbles: true`; the egg wobbles once per change.
+    /// Bumped on every prayer; the egg wobbles once per change.
     private(set) var wobbleCount = 0
 
-    func spawn(_ emoji: String, xFraction: Double = .random(in: 0...1), wobbles: Bool = false) {
-        let particle = Particle(emoji: emoji, xFraction: min(max(xFraction, 0), 1))
+    /// Wobble the egg once without a prayer (a new crack appeared).
+    func wobble() { wobbleCount += 1 }
+
+    func spawn(xFraction: Double = .random(in: 0...1)) {
+        let particle = Particle(xFraction: min(max(xFraction, 0), 1))
         particles.append(particle)
-        if wobbles { wobbleCount += 1 }
+        wobbleCount += 1
         Task {
             try? await Task.sleep(for: Self.lifetime)
             particles.removeAll { $0.id == particle.id }
@@ -577,8 +713,8 @@ final class EmojiBurst {
 
 /// Draws the particles inside the pet's own frame, so the transparent panel never needs to grow.
 @MainActor
-struct EmojiParticleLayer: View {
-    let burst: EmojiBurst
+struct PrayerEmojiLayer: View {
+    let burst: PrayerBurst
     let size: CGFloat
     let animated: Bool
 
@@ -589,8 +725,7 @@ struct EmojiParticleLayer: View {
         let emojiSize = Self.emojiSize(petSize: size)
         ZStack {
             ForEach(burst.particles) { particle in
-                EmojiParticle(emoji: particle.emoji, xFraction: particle.xFraction,
-                              petSize: size, emojiSize: emojiSize)
+                PrayerEmoji(xFraction: particle.xFraction, petSize: size, emojiSize: emojiSize)
             }
         }
         .frame(width: size, height: size)
@@ -600,8 +735,7 @@ struct EmojiParticleLayer: View {
 
 /// One particle at a fixed point of its flight (`progress` 0 = just spawned, 1 = gone).
 @MainActor
-struct EmojiParticleFrame: View {
-    let emoji: String
+struct PrayerEmojiFrame: View {
     let xFraction: Double
     let petSize: CGFloat
     let emojiSize: CGFloat
@@ -612,7 +746,7 @@ struct EmojiParticleFrame: View {
         let x = emojiSize / 2 + CGFloat(xFraction) * (petSize - emojiSize)
         let startY = petSize * 0.7
         let endY = emojiSize / 2
-        Text(emoji)
+        Text("🙏")
             .font(.system(size: emojiSize * 0.8))
             .frame(width: emojiSize, height: emojiSize)
             .position(x: x, y: startY + (endY - startY) * CGFloat(progress))
@@ -621,15 +755,14 @@ struct EmojiParticleFrame: View {
 }
 
 @MainActor
-private struct EmojiParticle: View {
-    let emoji: String
+private struct PrayerEmoji: View {
     let xFraction: Double
     let petSize: CGFloat
     let emojiSize: CGFloat
     @State private var progress = 0.0
 
     var body: some View {
-        EmojiParticleFrame(emoji: emoji, xFraction: xFraction, petSize: petSize, emojiSize: emojiSize, progress: progress)
+        PrayerEmojiFrame(xFraction: xFraction, petSize: petSize, emojiSize: emojiSize, progress: progress)
             .onAppear { withAnimation(.easeOut(duration: 1)) { progress = 1 } }
     }
 }
@@ -673,6 +806,7 @@ private struct SpeechBubbleView: View {
         .padding(.bottom, 6)
     }
 }
+
 /// Detects a back-and-forth stroking motion from horizontal mouse samples. Pure, so it is
 /// unit-testable without AppKit events (same style as `FloatingPetController.isClick`).
 struct PettingDetector {
@@ -718,3 +852,70 @@ struct PettingDetector {
     }
 }
 
+/// Whether the heart bubble is up. Owned by the controller so the hosted view is built once and only observes this.
+@MainActor @Observable
+final class PetHeartState {
+    var isShowing = false
+}
+
+/// Pixel-art layout of the heart bubble, so it matches the Gen-V pixel sprites.
+/// One character per pixel: `.` empty, `O` outline, `W` fill, `R` heart, `D` heart shade, `H` heart highlight.
+/// A 2-step rounded bubble with its tail toward the lower left.
+enum HeartBubbleArt {
+    /// Pixel unit in points; an integer so edges stay crisp on 1x and 2x displays.
+    static let pixel: CGFloat = 2
+    static let rows = [
+        "..OOOOOOOOOOOOO..",
+        ".OWWWWWWWWWWWWWO.",
+        "OWWWWWWWWWWWWWWWO",
+        "OWWWWRRRWRRRWWWWO",
+        "OWWWRHHRRRRRRWWWO",
+        "OWWWRHRRRRRRDWWWO",
+        "OWWWRRRRRRRRDWWWO",
+        "OWWWWRRRRRRDWWWWO",
+        "OWWWWWRRRRDWWWWWO",
+        "OWWWWWWRRDWWWWWWO",
+        "OWWWWWWWDWWWWWWWO",
+        "OWWWWWWWWWWWWWWWO",
+        ".OWWWWWWWWWWWWWO.",
+        "..OWWOOOOOOOOOO..",
+        "..OWO............",
+        "..OO.............",
+    ]
+
+    static func color(for cell: Character) -> Color? {
+        switch cell {
+        case "O": Color(red: 0x20 / 255, green: 0x20 / 255, blue: 0x20 / 255)
+        case "W": Color.white
+        case "R": Color(red: 0xE0 / 255, green: 0x30 / 255, blue: 0x3C / 255)
+        case "D": Color(red: 0xA8 / 255, green: 0x20 / 255, blue: 0x2C / 255)
+        case "H": Color(red: 0xFF / 255, green: 0x9A / 255, blue: 0xA2 / 255)
+        default: nil
+        }
+    }
+}
+
+/// Transient heart shown after stroking the pet: a pixel-art speech bubble drawn on an integer grid.
+/// Same colors in light and dark mode (game style).
+@MainActor
+struct HeartBubbleView: View {
+    let l: L
+
+    var body: some View {
+        let rows = HeartBubbleArt.rows
+        let pixel = HeartBubbleArt.pixel
+        Canvas { context, _ in
+            for (y, row) in rows.enumerated() {
+                for (x, cell) in row.enumerated() {
+                    guard let color = HeartBubbleArt.color(for: cell) else { continue }
+                    context.fill(Path(CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel,
+                                             width: pixel, height: pixel)),
+                                 with: .color(color))
+                }
+            }
+        }
+        .frame(width: CGFloat(rows[0].count) * pixel, height: CGFloat(rows.count) * pixel)
+        .padding(.bottom, 6)
+        .accessibilityLabel(l.floatingPetHeartsLabel)
+    }
+}

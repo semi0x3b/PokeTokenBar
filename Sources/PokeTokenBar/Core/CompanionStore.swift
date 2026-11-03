@@ -243,6 +243,8 @@ final class CompanionStore {
     var isEgg: Bool { state.active == nil }
     var eggStarted: Bool { state.eggUsage > 0 }
     var eggProgress: Double { min(1, max(0, Double(state.eggUsage) / Double(eggHatchThreshold))) }
+    /// How cracked the egg looks (0 while a Pokémon is being raised).
+    var eggCrackStage: Int { isEgg ? EggCracks.stage(forProgress: eggProgress) : 0 }
     var eggTokensToHatch: Int { max(0, eggHatchThreshold - state.eggUsage) }
     /// 알이 부화 준비(100%)가 되었으나 PokéAPI 요청/후보 선택 실패로 다음 갱신을 기다리는 상태.
     private(set) var isHatchRetryDelayed = false
@@ -1699,7 +1701,7 @@ final class CompanionStore {
         let hatchBody: String
         if let prayers, prayers.count > 0 {
             hatchBody = l.notifPrayerHatchBody(name, prayers: prayers.count, shiny: showShiny,
-                                               legendary: line.rarity == .legendary)
+                                               rarity: line.rarity)
         } else {
             hatchBody = showShiny ? l.notifShinyHatchBody(name, odds: shinyOdds) : l.notifHatchBody(name)
         }

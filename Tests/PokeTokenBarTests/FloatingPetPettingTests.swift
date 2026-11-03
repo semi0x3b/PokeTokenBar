@@ -82,50 +82,98 @@ final class PettingDetectorTests: XCTestCase {
     }
 }
 
-/// Hearts reuse the prayer particle system; they must not make the pet wobble like the egg.
+/// The heart bubble: Bool state decision, priority, tooltip suppression and the pixel art.
 @MainActor
-final class StrokeHeartTests: XCTestCase {
-    func testHeartParticlesStackWithoutWobbling() {
-        let burst = EmojiBurst()
-        burst.spawn("❤️")
-        burst.spawn("❤️")
-        XCTAssertEqual(burst.particles.map(\.emoji), ["❤️", "❤️"], "rapid strokes stack up")
-        XCTAssertEqual(burst.wobbleCount, 0)
-        burst.spawn("🙏", wobbles: true)
-        XCTAssertEqual(burst.wobbleCount, 1, "prayers still wobble the egg")
+final class StrokeHeartBubbleTests: XCTestCase {
+    func testStrokeShowsHeartsUnlessALimitAlertIsActive() {
+        XCTAssertTrue(FloatingPetController.heartsShowing(afterStrokeWithAlertActive: false))
+        XCTAssertFalse(FloatingPetController.heartsShowing(afterStrokeWithAlertActive: true))
+    }
+
+    func testHeartsDurationIsAboutTwoSeconds() {
+        XCTAssertEqual(FloatingPetController.heartDuration, .milliseconds(1800))
+    }
+
+    func testHeartsOrAlertReserveBubbleHeadroom() {
+        XCTAssertTrue(FloatingPetController.isShowingBubble(alertActive: false, heartsShowing: true))
+        XCTAssertTrue(FloatingPetController.isShowingBubble(alertActive: true, heartsShowing: false))
+        XCTAssertFalse(FloatingPetController.isShowingBubble(alertActive: false, heartsShowing: false))
+    }
+
+    func testNativeToolTipIsClearedWhileABubbleShows() {
+        XCTAssertNil(FloatingPetController.nativeToolTip("Today: 1 tokens", bubbleShowing: true))
+        XCTAssertEqual(FloatingPetController.nativeToolTip("Today: 1 tokens", bubbleShowing: false),
+                       "Today: 1 tokens")
+    }
+
+    func testHeartStateStartsHidden() {
+        XCTAssertFalse(PetHeartState().isShowing)
+    }
+
+    func testHeartBubbleArtRowsShareOneWidth() {
+        let rows = HeartBubbleArt.rows
+        XCTAssertTrue(rows.allSatisfy { $0.count == rows[0].count })
+    }
+
+    func testHeartIsSymmetricExceptShadeAndHighlight() {
+        // Rows 3...10 hold the heart; the tail below is deliberately lopsided.
+        for row in HeartBubbleArt.rows[3...10] {
+            let plain = row.map { "RDH".contains($0) ? Character("R") : $0 }
+            XCTAssertEqual(String(plain.reversed()), String(plain), row)
+        }
+    }
+
+    func testHeartBubbleFitsThePanelAndHeadroom() {
+        let rows = HeartBubbleArt.rows
+        XCTAssertLessThanOrEqual(CGFloat(rows[0].count) * HeartBubbleArt.pixel, FloatingPetController.bubbleMinWidth)
+        // bubble + 6pt bottom padding + 8pt VStack spacing
+        XCTAssertLessThanOrEqual(CGFloat(rows.count) * HeartBubbleArt.pixel + 6 + 8,
+                                 FloatingPetController.bubbleHeadroom)
+    }
+
+    func testEveryArtCellHasAColorOrIsTransparent() {
+        let cells = Set(HeartBubbleArt.rows.joined())
+        XCTAssertEqual(cells, ["O", "W", "R", "D", "H", "."])
+        for cell in cells where cell != "." { XCTAssertNotNil(HeartBubbleArt.color(for: cell)) }
+    }
+
+    func testHeartsLabelIsLocalizedInEveryLanguage() {
+        let labels = AppLanguage.allCases.map { L($0).floatingPetHeartsLabel }
+        XCTAssertFalse(labels.contains(""))
+        XCTAssertGreaterThan(Set(labels).count, 1)
     }
 }
 
-/// Optional sample-data renders of the floating pet with three hearts frozen mid-flight.
+/// Optional sample-data renders of the heart bubble alone and above the floating egg.
 /// Set `PTB_PETTING_RENDER_DIR` to write PNGs; otherwise skipped.
 @MainActor
 final class FloatingPetPettingRenderingTests: XCTestCase {
-    func testRenderPetWithHearts() throws {
+    func testRenderHeartBubble() throws {
         guard let directory = ProcessInfo.processInfo.environment["PTB_PETTING_RENDER_DIR"] else {
             throw XCTSkip("PTB_PETTING_RENDER_DIR not set")
         }
-        let petSize: CGFloat = 128
-        let emojiSize = EmojiParticleLayer.emojiSize(petSize: petSize)
+        let petSize: CGFloat = 96
+        let l = L(.en)
         for (scheme, name, desktop) in [
             (ColorScheme.light, "light", NSColor(calibratedWhite: 0.78, alpha: 1)),
             (ColorScheme.dark, "dark", NSColor(calibratedWhite: 0.16, alpha: 1)),
         ] {
-            for (label, hearts) in [("before", [(Double, Double)]()),
-                                    ("after", [(0.2, 0.3), (0.55, 0.55), (0.85, 0.8)])] {
-                let pet = ZStack {
+            let variants: [(String, AnyView)] = [
+                ("bubble", AnyView(HeartBubbleView(l: l))),
+                ("before", AnyView(SpriteView(speciesID: nil, size: petSize, animated: false, shiny: false)
+                    .frame(width: petSize, height: petSize))),
+                ("after", AnyView(VStack(spacing: 8) {
+                    HeartBubbleView(l: l)
                     SpriteView(speciesID: nil, size: petSize, animated: false, shiny: false)
                         .frame(width: petSize, height: petSize)
-                    ForEach(hearts, id: \.0) { fraction, progress in
-                        EmojiParticleFrame(emoji: "❤️", xFraction: fraction, petSize: petSize,
-                                           emojiSize: emojiSize, progress: progress)
-                    }
-                }
-                .frame(width: petSize, height: petSize)
-                .padding(36)
-                .background(Color(nsColor: desktop))
-                .environment(\.colorScheme, scheme)
-                let renderer = ImageRenderer(content: pet)
-                renderer.scale = 2
+                })),
+            ]
+            for (label, content) in variants {
+                let renderer = ImageRenderer(content: content
+                    .padding(24)
+                    .background(Color(nsColor: desktop))
+                    .environment(\.colorScheme, scheme))
+                renderer.scale = 4
                 let image = try XCTUnwrap(renderer.nsImage)
                 let rep = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(image.tiffRepresentation)))
                 let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))

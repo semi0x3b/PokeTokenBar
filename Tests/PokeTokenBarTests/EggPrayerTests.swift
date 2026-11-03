@@ -192,27 +192,71 @@ final class EggPrayerTests: XCTestCase {
 
     // MARK: text
 
-    func testPrayerHatchNotificationText() {
+    func testPrayerHatchNotificationFollowsTheOutcome() {
         let ko = L(.ko), en = L(.en)
-        XCTAssertEqual(ko.notifPrayerHatchBody("피카츄", prayers: 37, shiny: false, legendary: false),
-                       "기도 37번 끝에 피카츄가 나왔어요!")
-        XCTAssertEqual(ko.notifPrayerHatchBody("뮤", prayers: 37, shiny: false, legendary: true),
+        XCTAssertEqual(ko.notifPrayerHatchBody("뮤", prayers: 37, shiny: true, rarity: .legendary),
+                       "기도 37번… 하늘이 진심이었다. 이로치 뮤!")
+        XCTAssertEqual(en.notifPrayerHatchBody("Mew", prayers: 37, shiny: true, rarity: .legendary),
+                       "37 prayers… heaven went all in. Shiny Mew!")
+        XCTAssertEqual(ko.notifPrayerHatchBody("뮤", prayers: 37, shiny: false, rarity: .legendary),
                        "기도 37번… 통했다?! 뮤가 나왔어요!")
-        XCTAssertEqual(ko.notifPrayerHatchBody("피카츄", prayers: 37, shiny: true, legendary: false),
-                       "기도 37번 끝에 이로치 피카츄가 나왔어요!")
-        XCTAssertEqual(ko.notifPrayerHatchBody("뮤", prayers: 3, shiny: true, legendary: true),
-                       "기도 3번… 통했다?! 이로치 뮤가 나왔어요!")
-        XCTAssertEqual(en.notifPrayerHatchBody("Pikachu", prayers: 37, shiny: false, legendary: false),
-                       "After 37 prayers: Pikachu hatched!")
-        XCTAssertEqual(en.notifPrayerHatchBody("Mew", prayers: 37, shiny: true, legendary: true),
-                       "37 prayers… it worked?! A shiny Mew hatched!")
+        XCTAssertEqual(en.notifPrayerHatchBody("Mew", prayers: 37, shiny: false, rarity: .legendary),
+                       "37 prayers… it worked?! Mew hatched!")
+        XCTAssertEqual(ko.notifPrayerHatchBody("피카츄", prayers: 37, shiny: true, rarity: .rare),
+                       "기도 37번에 반짝이까지?! 피카츄가 나왔어요!")
+        XCTAssertEqual(en.notifPrayerHatchBody("Pikachu", prayers: 37, shiny: true, rarity: .common),
+                       "37 prayers AND it's shiny?! Pikachu hatched!")
+        for rarity in [Rarity.uncommon, .rare] {
+            XCTAssertEqual(ko.notifPrayerHatchBody("피카츄", prayers: 37, shiny: false, rarity: rarity),
+                           "기도 37번 끝에 피카츄가 나왔어요. 반은 통한 걸로 칩시다.")
+            XCTAssertEqual(en.notifPrayerHatchBody("Pikachu", prayers: 37, shiny: false, rarity: rarity),
+                           "37 prayers later: Pikachu. Let's call it half a miracle.")
+        }
+        XCTAssertEqual(ko.notifPrayerHatchBody("꼬렛", prayers: 3, shiny: false, rarity: .common),
+                       "기도 3번 끝에 꼬렛이 나왔어요. 하늘도 오늘 바빴나 봐요.")
+        XCTAssertEqual(en.notifPrayerHatchBody("Rattata", prayers: 3, shiny: false, rarity: .common),
+                       "3 prayers later: Rattata. Heaven must be swamped today.")
+    }
+
+    func testEveryLanguageHasACopyForEveryPrayerOutcome() {
+        for language in AppLanguage.allCases {
+            let l = L(language)
+            for (shiny, rarity) in [(true, Rarity.legendary), (false, .legendary), (true, .rare),
+                                    (false, .rare), (false, .common)] {
+                XCTAssertTrue(l.notifPrayerHatchBody("X", prayers: 5, shiny: shiny, rarity: rarity).contains("5"))
+            }
+            for n in [1, 3, 7, 20, 40, 70, 200] {
+                XCTAssertFalse(l.prayerQuip(n).isEmpty)
+                XCTAssertTrue(l.prayerHoverLine(n).contains("\(n)"))
+            }
+        }
+    }
+
+    func testQuipTiersChangeExactlyAtTheBoundaries() {
+        let boundaries: [(Int, Int)] = [(1, 0), (2, 1), (4, 1), (5, 2), (9, 2), (10, 3), (29, 3),
+                                        (30, 4), (49, 4), (50, 5), (99, 5), (100, 6), (5000, 6)]
+        for (prayers, tier) in boundaries {
+            XCTAssertEqual(L.prayerQuipTier(prayers), tier, "\(prayers) prayers")
+        }
+    }
+
+    func testHoverLineCopy() {
+        XCTAssertEqual(L(.ko).prayerHoverLine(1), "기도 1회 · 일단 찔러봄")
+        XCTAssertEqual(L(.ko).prayerHoverLine(30), "기도 30회 · 하늘 고객센터 대기 순번 3,812번")
+        XCTAssertEqual(L(.en).prayerHoverLine(1), "1 prayer · just testing the line")
+        XCTAssertEqual(L(.en).prayerHoverLine(3), "3 prayers · heaven left you on read")
+        XCTAssertEqual(L(.en).prayerHoverLine(100), "100 prayers · if a legendary hatches, that's pure skill")
     }
 
     func testFutileNoteDependsOnHowTheEggArrived() {
         XCTAssertEqual(L(.ko).prayerFutileNote(purchased: true), "참고: 이 아이는 알을 산 순간 정해져 있었어요.")
         XCTAssertEqual(L(.ko).prayerFutileNote(purchased: false), "참고: 이 아이는 알이 온 순간 정해져 있었어요.")
-        XCTAssertEqual(L(.ko).prayerBornWith(37), "기도 37회로 태어남")
-        XCTAssertEqual(L(.ko).prayerCount(3), "기도 3회")
+        XCTAssertEqual(L(.en).prayerFutileNote(purchased: true),
+                       "Fun fact: this one was decided the moment you bought the egg.")
+        XCTAssertEqual(L(.en).prayerFutileNote(purchased: false),
+                       "Fun fact: this one was decided the moment the egg arrived.")
+        XCTAssertEqual(L(.ko).prayerBornWith(37), "기도 37번 받고 태어남")
+        XCTAssertEqual(L(.en).prayerBornWith(37), "Born after 37 prayers")
     }
 
     // MARK: floating pet click routing and particles
@@ -223,23 +267,23 @@ final class EggPrayerTests: XCTestCase {
     }
 
     func testBurstSpawnsClampedParticlesAndRemovesThemItself() async throws {
-        let burst = EmojiBurst()
-        burst.spawn("🙏", xFraction: -3, wobbles: true)
-        burst.spawn("🙏", xFraction: 7, wobbles: true)
-        burst.spawn("🙏", wobbles: true)
+        let burst = PrayerBurst()
+        burst.spawn(xFraction: -3)
+        burst.spawn(xFraction: 7)
+        burst.spawn()
         XCTAssertEqual(burst.particles.count, 3, "rapid clicks stack up")
         XCTAssertEqual(burst.wobbleCount, 3)
         XCTAssertEqual(burst.particles[0].xFraction, 0)
         XCTAssertEqual(burst.particles[1].xFraction, 1)
         XCTAssertTrue(burst.particles.allSatisfy { (0...1).contains($0.xFraction) })
-        try await Task.sleep(for: EmojiBurst.lifetime + .milliseconds(300))
+        try await Task.sleep(for: PrayerBurst.lifetime + .milliseconds(300))
         XCTAssertTrue(burst.particles.isEmpty, "each particle removes itself")
         XCTAssertEqual(burst.wobbleCount, 3)
     }
 
     func testEmojiStaysInsideThePetFrameAtEverySize() {
         for petSize in stride(from: CGFloat(48), through: 384, by: 8) {
-            let emoji = EmojiParticleLayer.emojiSize(petSize: petSize)
+            let emoji = PrayerEmojiLayer.emojiSize(petSize: petSize)
             XCTAssertLessThanOrEqual(emoji, petSize)
             for fraction in [0.0, 1.0] {
                 let centre = emoji / 2 + CGFloat(fraction) * (petSize - emoji)
@@ -254,6 +298,116 @@ final class EggPrayerTests: XCTestCase {
         let plain = FloatingPetView.hoverTooltip(todayTokens: 1, limitUtilization: nil, mode: .used, l: l)
         let prayed = FloatingPetView.hoverTooltip(todayTokens: 1, limitUtilization: nil, mode: .used, l: l, prayers: 3)
         XCTAssertFalse(plain.contains("기도"))
-        XCTAssertEqual(prayed, plain + "\n기도 3회")
+        XCTAssertEqual(prayed, plain + "\n기도 3회 · 하늘이 읽씹 중")
     }
+
+    // MARK: prayer-triggered usage refresh
+
+    private func makeRouter(clock: @escaping () -> Date, log: PrayerCallLog) -> PetClickRouter {
+        PetClickRouter(pray: { log.prays += 1; log.eggPrayers += 1 }, prayerCount: { log.eggPrayers },
+                       spawnEmoji: { log.emojis += 1 }, refreshUsage: { log.refreshes += 1 },
+                       openPopover: { log.opens += 1 }, clock: clock)
+    }
+
+    private func pray(_ times: Int, on router: PetClickRouter) {
+        for _ in 0..<times { router.handle(subjectIsEgg: true) }
+    }
+
+    func testMilestonesGrowByTheStepEachTime() {
+        let milestones = [0: 0, 9: 0, 10: 1, 11: 1, 29: 1, 30: 2, 59: 2, 60: 3, 99: 3, 100: 4, 149: 4, 150: 5]
+        for (count, milestone) in milestones {
+            XCTAssertEqual(FloatingPetController.prayerRefreshMilestone(for: count), milestone, "\(count) prayers")
+        }
+        XCTAssertEqual(FloatingPetController.prayerRefreshMilestone(for: Int.max / 4) > 0, true, "huge counts do not trap")
+    }
+
+    func testPrayerRefreshFollowsTheMilestones() {
+        var current = now
+        let log = PrayerCallLog()
+        let router = makeRouter(clock: { current }, log: log)
+        let floor = FloatingPetController.prayerRefreshInterval
+
+        pray(9, on: router)
+        XCTAssertEqual(log.refreshes, 0, "9 prayers: no refresh")
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 1, "the 10th prayer refreshes")
+        current = now.addingTimeInterval(floor)
+        pray(19, on: router)
+        XCTAssertEqual(log.refreshes, 1, "11-29: no refresh")
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 2, "the 30th prayer refreshes")
+        current = now.addingTimeInterval(floor * 2)
+        pray(29, on: router)
+        XCTAssertEqual(log.refreshes, 2)
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 3, "the 60th prayer refreshes")
+        current = now.addingTimeInterval(floor * 3)
+        pray(39, on: router)
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 4, "the 100th prayer refreshes")
+        XCTAssertEqual(log.emojis, log.prays, "every click still spawns its emoji")
+    }
+
+    func testAMilestoneInsideTheFloorIsRefreshedByTheFirstClickAfterIt() {
+        var current = now
+        let log = PrayerCallLog()
+        let router = makeRouter(clock: { current }, log: log)
+        pray(10, on: router)
+        XCTAssertEqual(log.refreshes, 1)
+        current = now.addingTimeInterval(5)
+        pray(20, on: router)   // reaches 30 only 5 s after the last refresh
+        XCTAssertEqual(log.refreshes, 1, "the floor holds the 30th-prayer refresh back")
+        current = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval)
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 2, "the first click after the floor does not lose the milestone")
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 2, "and it is not refreshed twice")
+    }
+
+    func testANewEggStartsTheMilestonesOver() {
+        var current = now
+        let log = PrayerCallLog()
+        let router = makeRouter(clock: { current }, log: log)
+        pray(30, on: router)   // refreshes at 10; the 30th is held back by the floor
+        XCTAssertEqual(log.refreshes, 1)
+        current = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval * 2)
+        log.eggPrayers = 0     // a new egg: the persisted prayer count starts over
+        pray(9, on: router)
+        XCTAssertEqual(log.refreshes, 1)
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 2, "the new egg's 10th prayer refreshes again")
+    }
+
+    func testClickingAHatchedPokemonOpensThePopoverWithoutPrayingOrRefreshing() {
+        let log = PrayerCallLog()
+        let router = makeRouter(clock: { self.now }, log: log)
+        pray(9, on: router)
+        for _ in 0..<50 { router.handle(subjectIsEgg: false) }
+        XCTAssertEqual(log.opens, 50)
+        XCTAssertEqual(log.prays, 9)
+        XCTAssertEqual(log.refreshes, 0, "hatched-Pokémon clicks never count")
+        pray(1, on: router)
+        XCTAssertEqual(log.refreshes, 1, "the 10th real prayer still refreshes")
+    }
+
+    func testShouldRefreshOnPrayerDecision() {
+        let later = now.addingTimeInterval(FloatingPetController.prayerRefreshInterval)
+        func decide(_ count: Int, last: Int, at: Date?, _ moment: Date) -> Bool {
+            FloatingPetController.shouldRefreshOnPrayer(count: count, lastRefreshedMilestone: last,
+                                                        lastRefreshAt: at, now: moment)
+        }
+        XCTAssertFalse(decide(9, last: 0, at: nil, now))
+        XCTAssertTrue(decide(10, last: 0, at: nil, now))
+        XCTAssertFalse(decide(10, last: 1, at: nil, now), "already refreshed at this milestone")
+        XCTAssertFalse(decide(10, last: 0, at: now, now), "inside the floor")
+        XCTAssertTrue(decide(10, last: 0, at: now, later))
+        XCTAssertTrue(decide(30, last: 1, at: now, later))
+    }
+}
+
+@MainActor
+private final class PrayerCallLog {
+    var prays = 0, emojis = 0, refreshes = 0, opens = 0
+    /// The persisted prayer count of the current egg (reset by the test to simulate a new egg).
+    var eggPrayers = 0
 }
