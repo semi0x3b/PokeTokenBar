@@ -253,15 +253,15 @@ final class EggPrayerTests: XCTestCase {
 
     func testHoverLineCopy() {
         XCTAssertEqual(L(.ko).prayerHoverLine(0), "")
-        XCTAssertEqual(L(.ko).prayerHoverLine(1), "기도 1회 · 일단 찔러봄")
-        XCTAssertEqual(L(.ko).prayerHoverLine(30), "기도 30회 · 하늘이 읽씹 중")
-        XCTAssertEqual(L(.ko).prayerHoverLine(150), "기도 150회 · 하늘 고객센터 대기 순번 3,812번")
-        XCTAssertEqual(L(.ko).prayerHoverLine(240), "기도 240회 · 하늘: \"접수됐습니다. 검토 후 연락드릴게요\"")
-        XCTAssertEqual(L(.ko).prayerHoverLine(299), "기도 299회 · 알이 방금 \"그만해…\"라고 한 것 같음")
-        XCTAssertEqual(L(.en).prayerHoverLine(1), "1 prayer · just testing the line")
-        XCTAssertEqual(L(.en).prayerHoverLine(31), "31 prayers · heaven left you on read")
+        XCTAssertEqual(L(.ko).prayerHoverLine(1), "기도 1회 · 일단 한번 빌어봄")
+        XCTAssertEqual(L(.ko).prayerHoverLine(30), "기도 30회 · 하늘이 아직 확인 안 함")
+        XCTAssertEqual(L(.ko).prayerHoverLine(150), "기도 150회 · 하늘 대기열 3,812번째")
+        XCTAssertEqual(L(.ko).prayerHoverLine(240), "기도 240회 · 하늘: \"접수했습니다. 검토 후 답변드릴게요\"")
+        XCTAssertEqual(L(.ko).prayerHoverLine(299), "기도 299회 · 알이 방금 \"그만…\"이라고 한 것 같음")
+        XCTAssertEqual(L(.en).prayerHoverLine(1), "1 prayer · just trying it out")
+        XCTAssertEqual(L(.en).prayerHoverLine(31), "31 prayers · heaven hasn't checked yet")
         XCTAssertEqual(L(.en).prayerHoverLine(120), "120 prayers · heaven's servers are lagging")
-        XCTAssertEqual(L(.en).prayerHoverLine(180), "180 prayers · your palms are losing their fingerprints")
+        XCTAssertEqual(L(.en).prayerHoverLine(180), "180 prayers · your palms are wearing thin")
         XCTAssertEqual(L(.en).prayerHoverLine(300), "300 prayers · if a legendary hatches, that's pure skill")
     }
 
@@ -315,7 +315,7 @@ final class EggPrayerTests: XCTestCase {
         let plain = FloatingPetView.hoverTooltip(todayTokens: 1, limitUtilization: nil, mode: .used, l: l)
         let prayed = FloatingPetView.hoverTooltip(todayTokens: 1, limitUtilization: nil, mode: .used, l: l, prayers: 3)
         XCTAssertFalse(plain.contains("기도"))
-        XCTAssertEqual(prayed, plain + "\n기도 3회 · 일단 찔러봄")
+        XCTAssertEqual(prayed, plain + "\n기도 3회 · 일단 한번 빌어봄")
     }
 
     // MARK: prayer-triggered usage refresh
