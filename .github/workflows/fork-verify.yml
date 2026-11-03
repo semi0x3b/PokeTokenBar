@@ -1,0 +1,51 @@
+# Fork-only: run the full test gate plus env-gated feature renders on any branch,
+# because the local machine has no XCTest. Not meant for upstream.
+name: fork-verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or commit to verify
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-verify-${{ inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Test + coverage gate (with feature renders)
+        env:
+          PTB_PRAYER_RENDER_DIR: ${{ runner.temp }}/renders/egg-prayer
+          PTB_SULK_RENDER_DIR: ${{ runner.temp }}/renders/sulk-back-sprite
+          PTB_PETTING_RENDER_DIR: ${{ runner.temp }}/renders/pet-petting
+          LOG_FILE: ${{ runner.temp }}/test-gate.log
+        run: |
+          mkdir -p "$PTB_PRAYER_RENDER_DIR" "$PTB_SULK_RENDER_DIR" "$PTB_PETTING_RENDER_DIR"
+          set -o pipefail
+          ./scripts/test-gate.sh 2>&1 | tee "$LOG_FILE"
+
+      - name: Upload renders and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/renders
+            ${{ runner.temp }}/test-gate.log
+          if-no-files-found: ignore
+          retention-days: 7
