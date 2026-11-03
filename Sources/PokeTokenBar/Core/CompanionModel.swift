@@ -241,7 +241,7 @@ enum Mint {
 enum ShinyCharm {
     /// 상점 구매가. 앞으로의 모든 부화에 적용되는 영구 럭 업그레이드라 프리미엄(레어 1마리 졸업분=3B).
     static let price = 3_000_000_000
-    /// 보유 시 이로치 부화 확률 분모 — 1/64 → 1/48 (+33%). 본가 '반짝이 부적'(이로치 확률↑) 오마주.
+    /// 보유 시 이로치 부화 확률 분모 — 1/64 → 1/48 (+33%). 본가 '이로치 부적'(이로치 확률↑) 오마주.
     /// ×2(1/32)는 과해 절제. 이미 부화한 개체엔 소급 없음(이로치는 부화 순간 확정).
     static let shinyDenominator: UInt64 = 48
 }
@@ -453,8 +453,11 @@ enum PokemonOdds {
 /// Purely cosmetic: no roll (species, rarity, shiny, nature, form, profile) ever reads it.
 struct PrayerRecord: Codable, Sendable, Equatable {
     var count: Int
-    /// The species was already rolled (`pendingHatchID != nil`) when the first prayer was said.
+    /// The species was already rolled (`pendingHatchID != nil`) when the first prayer was said. Cleared at hatch
+    /// when a different species hatched (`rolledSpeciesID`) or the hatch turned out to be a Ditto.
     var wasFutile: Bool
+    /// That pre-rolled species. Compared with the hatched one: the tier guard can discard a pre-roll and re-roll.
+    var rolledSpeciesID: Int? = nil
     /// The egg came from `buyEgg`; otherwise it arrived by itself (first egg, graduation).
     var eggWasPurchased: Bool
 }
