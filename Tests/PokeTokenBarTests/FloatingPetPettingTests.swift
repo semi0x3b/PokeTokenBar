@@ -104,6 +104,25 @@ final class PettingDetectorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(panel.height - pet, 40, "hearts bubble (~32pt) + spacing fits the headroom")
     }
 
+    func testHeartBubbleArtIsSymmetricAndFitsThePanel() {
+        for count in 1...FloatingPetController.maxHeartLevel {
+            let rows = HeartBubbleArt.rows(count: count)
+            let width = rows[0].count
+            XCTAssertTrue(rows.allSatisfy { $0.count == width }, "rows must share one width")
+            XCTAssertEqual(width % 2, 1, "odd width keeps the tail centered")
+            for row in rows {
+                let plain = row.replacingOccurrences(of: "H", with: "R")   // highlight is deliberately asymmetric
+                XCTAssertEqual(String(plain.reversed()), plain)
+            }
+            XCTAssertLessThanOrEqual(CGFloat(width) * HeartBubbleArt.pixel, FloatingPetController.bubbleMinWidth)
+            // bubble + 6pt bottom padding + 8pt VStack spacing
+            XCTAssertLessThanOrEqual(CGFloat(rows.count) * HeartBubbleArt.pixel + 6 + 8,
+                                     FloatingPetController.bubbleHeadroom)
+            let heartPixels = rows.joined().filter { $0 == "R" || $0 == "H" }.count
+            XCTAssertEqual(heartPixels, count * 27, "each 7x6 heart bitmap has 27 pixels")
+        }
+    }
+
     func testHeartsLabelIsLocalizedInEveryLanguage() {
         let labels = AppLanguage.allCases.map { L($0).floatingPetHeartsLabel }
         XCTAssertFalse(labels.contains(""))
@@ -146,7 +165,7 @@ final class FloatingPetPettingRenderingTests: XCTestCase {
             ("light", ColorScheme.light, NSColor(calibratedWhite: 0.78, alpha: 1)),
             ("dark", ColorScheme.dark, NSColor(calibratedWhite: 0.16, alpha: 1)),
         ] {
-            for (label, level) in [("before", 0), ("after", 3)] {
+            for (label, level) in [("before", 0), ("hearts1", 1), ("hearts2", 2), ("hearts3", 3)] {
                 let hearts = PetHeartState()
                 hearts.level = level
                 let host = NSHostingView(rootView: FloatingPetView(animated: false, hearts: hearts)

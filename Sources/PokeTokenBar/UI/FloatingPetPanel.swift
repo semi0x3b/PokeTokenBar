@@ -606,37 +606,69 @@ struct PettingDetector {
     }
 }
 
-/// Transient hearts shown after stroking the pet. Same chrome as `SpeechBubbleView`.
+/// Pixel-art layout of the heart bubble, so it matches the Gen-V pixel sprites.
+/// One character per pixel: `.` empty, `O` outline, `W` fill, `R` heart, `H` heart highlight.
+enum HeartBubbleArt {
+    /// Pixel unit in points; an integer so edges stay crisp on 1x and 2x displays.
+    static let pixel: CGFloat = 2
+    private static let heart = [".XX.XX.", "XXXXXXX", "XXXXXXX", ".XXXXX.", "..XXX..", "...X..."]
+
+    /// Bubble for `count` hearts: stepped corners, 2p padding, a 3p-then-1p tail at the center.
+    /// Width is always odd (hearts + 6), so the tail sits exactly in the middle.
+    static func rows(count: Int) -> [String] {
+        let heartRows = heart.indices.map { row in
+            (0..<count).map { index -> String in
+                var cells = Array(heart[row].map { $0 == "X" ? Character("R") : "W" })
+                if row == 1, index == 0 { cells[1] = "H" }   // highlight on the top-left lobe
+                return String(cells)
+            }.joined(separator: "W")
+        }
+        let width = heartRows[0].count + 6
+        let center = width / 2
+        let edge = "." + String(repeating: "O", count: width - 2) + "."
+        let padding = "O" + String(repeating: "W", count: width - 2) + "O"
+        var bottom = Array(edge)
+        for column in (center - 1)...(center + 1) { bottom[column] = "W" }   // opening into the tail
+        let side = String(repeating: ".", count: center - 1)
+        return [edge, padding, padding]
+            + heartRows.map { "OWW" + $0 + "WWO" }
+            + [padding, padding, String(bottom), side + "OWO" + side,
+               String(repeating: ".", count: center) + "O" + String(repeating: ".", count: center)]
+    }
+
+    static func color(for cell: Character) -> Color? {
+        switch cell {
+        case "O": Color(red: 0x20 / 255, green: 0x20 / 255, blue: 0x20 / 255)
+        case "W", "H": Color.white
+        case "R": Color(red: 0xE0 / 255, green: 0x30 / 255, blue: 0x3C / 255)
+        default: nil
+        }
+    }
+}
+
+/// Transient hearts shown after stroking the pet: a pixel-art speech bubble drawn on an integer grid.
+/// Same colors in light and dark mode (game style).
 @MainActor
 private struct HeartBubbleView: View {
     let count: Int
     let l: L
 
     var body: some View {
-        Text(verbatim: String(repeating: "♥", count: count))
-            .font(.system(size: 14, weight: .bold))
-            .foregroundColor(.pink)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-            )
-            .overlay(
-                Path { path in
-                    path.move(to: CGPoint(x: 0, y: 0))
-                    path.addLine(to: CGPoint(x: 10, y: 0))
-                    path.addLine(to: CGPoint(x: 5, y: 6))
-                    path.closeSubpath()
+        let rows = HeartBubbleArt.rows(count: count)
+        let pixel = HeartBubbleArt.pixel
+        Canvas { context, _ in
+            for (y, row) in rows.enumerated() {
+                for (x, cell) in row.enumerated() {
+                    guard let color = HeartBubbleArt.color(for: cell) else { continue }
+                    context.fill(Path(CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel,
+                                             width: pixel, height: pixel)),
+                                 with: .color(color))
                 }
-                .fill(Color(nsColor: .windowBackgroundColor))
-                .frame(width: 10, height: 6)    // fixed frame so the tail sits at the bubble's center
-                .offset(y: 5),
-                alignment: .bottom
-            )
-            .padding(.bottom, 6)
-            .accessibilityLabel(l.floatingPetHeartsLabel)
+            }
+        }
+        .frame(width: CGFloat(rows[0].count) * pixel, height: CGFloat(rows.count) * pixel)
+        .padding(.bottom, 6)
+        .accessibilityLabel(l.floatingPetHeartsLabel)
     }
 }
 
