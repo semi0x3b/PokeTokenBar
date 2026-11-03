@@ -345,10 +345,21 @@ enum SpriteVisibleTop {
         return (box - fit.height) / 2 + min(max(opaqueTopFraction, 0), 1) * fit.height
     }
 
+    /// Which top to anchor to across an animation. The 10th percentile, not the minimum: a few
+    /// frames (a jump, a stretch) reach the canvas top and would drag the anchor far above where the
+    /// sprite usually is (Rotom-Heat: min 0, typical 0.32 of the canvas). The sprite may still rise
+    /// into the bubble on those few frames; the bubble is drawn over it.
+    static func anchorFraction(of frameFractions: [CGFloat]) -> CGFloat {
+        guard !frameFractions.isEmpty else { return 0 }
+        let sorted = frameFractions.sorted()
+        return sorted[Int(Double(sorted.count) * 0.1)]
+    }
+
     /// Y of a bubble's top edge, measured from the box top, so its tail tip lands `overlap` pt
-    /// below the sprite's visible top.
+    /// below the sprite's visible top. Rounded to whole points: a pixel-art bubble drawn at a
+    /// fractional offset leaves seams and blurred edges.
     static func bubbleTopOffset(visibleTop: CGFloat, bubbleHeight: CGFloat, overlap: CGFloat) -> CGFloat {
-        visibleTop + overlap - bubbleHeight
+        (visibleTop + overlap - bubbleHeight).rounded()
     }
 
     /// Share of the image height above its first non-transparent row; 0 when it cannot be read.

@@ -117,12 +117,18 @@ final class StrokeHeartBubbleTests: XCTestCase {
         XCTAssertTrue(rows.allSatisfy { $0.count == rows[0].count })
     }
 
-    func testHeartIsSymmetricExceptShadeAndHighlight() {
-        // Rows 3...10 hold the heart; the tail below is deliberately lopsided.
-        for row in HeartBubbleArt.rows[3...10] {
+    func testBubbleHeartAndTailAreSymmetricExceptShadeAndHighlight() {
+        for row in HeartBubbleArt.rows {
             let plain = row.map { "RDH".contains($0) ? Character("R") : $0 }
             XCTAssertEqual(String(plain.reversed()), String(plain), row)
         }
+    }
+
+    func testTailTipSitsAtTheHorizontalCenter() throws {
+        let rows = HeartBubbleArt.rows
+        let tip = try XCTUnwrap(rows.last)
+        XCTAssertEqual(tip.firstIndex(of: "O").map { tip.distance(from: tip.startIndex, to: $0) }, rows[0].count / 2)
+        XCTAssertEqual(tip.filter { $0 == "O" }.count, 1, "tail ends in a single pixel")
     }
 
     func testHeartBubbleFitsThePanelAndHeadroom() {
@@ -163,6 +169,21 @@ final class StrokeHeartBubbleTests: XCTestCase {
         let height = HeartBubbleArt.height
         let top = SpriteVisibleTop.bubbleTopOffset(visibleTop: 24, bubbleHeight: height, overlap: 3)
         XCTAssertEqual(top + height, 24 + 3, accuracy: 0.001, "tail tip 3pt below the visible top")
+    }
+
+    func testBubbleOffsetSnapsToWholePoints() {
+        let top = SpriteVisibleTop.bubbleTopOffset(visibleTop: 3.84, bubbleHeight: 32, overlap: 3)
+        XCTAssertEqual(top, top.rounded())
+        XCTAssertEqual(top, -25)
+    }
+
+    func testAnchorIgnoresFewOutlierFramesThatReachTheCanvasTop() {
+        // Rotom-Heat-like: most frames start ~0.3 down the canvas, one frame jumps to the top.
+        var fractions = [CGFloat](repeating: 0.3, count: 19)
+        fractions.append(0)
+        XCTAssertEqual(SpriteVisibleTop.anchorFraction(of: fractions), 0.3, accuracy: 0.001)
+        XCTAssertEqual(SpriteVisibleTop.anchorFraction(of: [0.2]), 0.2, accuracy: 0.001)
+        XCTAssertEqual(SpriteVisibleTop.anchorFraction(of: []), 0)
     }
 
     func testOpaqueTopFractionScansTheFirstVisibleRow() throws {
@@ -235,6 +256,79 @@ final class FloatingPetPettingRenderingTests: XCTestCase {
                 let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
                 try png.write(to: URL(fileURLWithPath: directory)
                     .appendingPathComponent("pet-\(label)-\(name).png"))
+            }
+        }
+    }
+
+    /// Real sprites (downloaded into a scratch directory, never the user's cache) under the bubble,
+    /// each rendered twice: plain, and with a green 1pt guide at the computed visible top.
+    /// Logs the numbers behind the anchor. Needs network.
+    func testRenderRealSpeciesWithHeartBubble() async throws {
+        guard let directory = ProcessInfo.processInfo.environment["PTB_PETTING_RENDER_DIR"] else {
+            throw XCTSkip("PTB_PETTING_RENDER_DIR not set")
+        }
+        let output = URL(fileURLWithPath: directory)
+        let sprites = FileManager.default.temporaryDirectory.appendingPathComponent("petting-sprites-\(UUID())")
+        try FileManager.default.createDirectory(at: sprites, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sprites) }
+        let store = SpriteStore(directory: sprites)
+        let base = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/"
+        let l = L(.en)
+
+        // speciesID nil = the egg (loaded through the shared store, as the prayer render does).
+        let cases: [(name: String, species: Int?, form: PokemonForm?)] = [
+            ("pikachu", 25, nil), ("snorlax", 143, nil), ("onix", 95, nil),
+            ("rotom-heat", 479, PokemonForm("heat")), ("egg", nil, nil),
+        ]
+        for (name, species, form) in cases {
+            if let species {
+                let asset = PokemonForm.assetName(speciesID: species, form: form)
+                let url = try XCTUnwrap(URL(string: base + "versions/generation-v/black-white/animated/\(asset).gif"))
+                let (data, response) = try await URLSession.shared.data(from: url)
+                XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200, name)
+                let key = SpriteStore.cacheKey(speciesID: species, animated: true, shiny: false, form: form)
+                try data.write(to: sprites.appendingPathComponent("\(key).gif"))
+                let frames = GIFDecoder.capFrameRate(GIFDecoder.frames(from: data), floor: 0.4)
+                let fractions = frames.map { SpriteVisibleTop.opaqueTopFraction(of: $0.image) }
+                for petSize in [96.0, 192.0] {
+                    let top = SpriteVisibleTop.inset(
+                        box: CGFloat(petSize), imageSize: frames[0].image.size,
+                        opaqueTopFraction: SpriteVisibleTop.anchorFraction(of: fractions))
+                    print("[petting] \(name) size=\(Int(petSize)) frames=\(frames.count) image=\(frames[0].image.size) "
+                          + "fractions min=\(fractions.min() ?? 0) max=\(fractions.max() ?? 0) "
+                          + "anchor=\(SpriteVisibleTop.anchorFraction(of: fractions)) visibleTop=\(top)")
+                }
+            }
+            for petSize in [CGFloat(96), 192] {
+                for guide in [false, true] {
+                    let sprite = SpriteView(speciesID: species, size: petSize, animated: species != nil,
+                                            minFrameDelay: 0.4, spriteStore: store, form: form,
+                                            reportsVisibleTop: true)
+                        .frame(width: petSize, height: petSize)
+                        .overlayPreferenceValue(SpriteVisibleTopKey.self, alignment: .top) { visibleTop in
+                            ZStack(alignment: .top) {
+                                HeartBubbleView(l: l)
+                                    .offset(y: SpriteVisibleTop.bubbleTopOffset(
+                                        visibleTop: visibleTop ?? 0, bubbleHeight: HeartBubbleArt.height,
+                                        overlap: HeartBubbleArt.tailOverlap))
+                                if guide {
+                                    Rectangle().fill(Color.green).frame(height: 1)
+                                        .offset(y: visibleTop ?? 0)
+                                }
+                            }
+                        }
+                        .padding(.top, HeartBubbleArt.height)
+                    let renderer = ImageRenderer(content: sprite
+                        .padding(24)
+                        .background(Color(nsColor: NSColor(calibratedWhite: 0.78, alpha: 1)))
+                        .environment(\.colorScheme, .light))
+                    renderer.scale = 4
+                    let image = try XCTUnwrap(renderer.nsImage)
+                    let rep = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(image.tiffRepresentation)))
+                    let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+                    try png.write(to: output.appendingPathComponent(
+                        "real-\(name)-\(Int(petSize))\(guide ? "-guide" : "").png"))
+                }
             }
         }
     }
